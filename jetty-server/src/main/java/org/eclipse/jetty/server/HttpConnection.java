@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -124,9 +124,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
 
     protected HttpChannelOverHttp newHttpChannel()
     {
-        HttpChannelOverHttp httpChannel = new HttpChannelOverHttp(this, _connector, _config, getEndPoint(), this);
-
-        return httpChannel;
+        return new HttpChannelOverHttp(this, _connector, _config, getEndPoint(), this);
     }
 
     protected HttpParser newHttpParser(HttpCompliance compliance)
@@ -285,9 +283,8 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         while (_parser.inContentState())
         {
             int filled = fillRequestBuffer();
-            boolean handle = parseRequestBuffer();
-            handled|=handle;
-            if (handle || filled<=0 || _channel.getRequest().getHttpInput().hasContent())
+            handled = parseRequestBuffer();
+            if (handled || filled<=0 || _input.hasContent())
                 break;
         }
         return handled;
@@ -338,6 +335,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
             catch (IOException e)
             {
                 LOG.debug(e);
+                _parser.atEOF();
                 return -1;
             }
         }
@@ -401,7 +399,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         else if (_parser.inContentState() && _generator.isPersistent())
         {
             // If we are async, then we have problems to complete neatly
-            if (_channel.getRequest().getHttpInput().isAsync())
+            if (_input.isAsync())
             {
                 if (LOG.isDebugEnabled())
                     LOG.debug("unconsumed async input {}", this);
@@ -412,7 +410,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
                 if (LOG.isDebugEnabled())
                     LOG.debug("unconsumed input {}", this);
                 // Complete reading the request
-                if (!_channel.getRequest().getHttpInput().consumeAll())
+                if (!_input.consumeAll())
                     _channel.abort(new IOException("unconsumed input"));
             }
         }
@@ -557,7 +555,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         getEndPoint().fillInterested(_blockingReadCallback);
     }
 
-    public void blockingReadException(Throwable e)
+    public void blockingReadFailure(Throwable e)
     {
         _blockingReadCallback.failed(e);
     }
@@ -624,7 +622,7 @@ public class HttpConnection extends AbstractConnection implements Runnable, Http
         {
             if (fillAndParseForContent())
                 _channel.handle();
-            else if (!_input.isFinished())
+            else if (!_input.isFinished() && !_input.hasContent())
                 asyncReadFillInterested();
         }
 

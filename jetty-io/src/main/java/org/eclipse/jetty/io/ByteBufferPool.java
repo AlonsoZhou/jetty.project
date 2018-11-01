@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -20,12 +20,12 @@ package org.eclipse.jetty.io;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
-import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.eclipse.jetty.util.BufferUtil;
-import org.eclipse.jetty.util.ConcurrentArrayQueue;
 
 /**
  * <p>A {@link ByteBuffer} pool.</p>
@@ -55,6 +55,11 @@ public interface ByteBufferPool
      * @see #acquire(int, boolean)
      */
     public void release(ByteBuffer buffer);
+
+    default ByteBuffer newByteBuffer(int capacity, boolean direct)
+    {
+        return direct ? BufferUtil.allocateDirect(capacity) : BufferUtil.allocate(capacity);
+    }
 
     public static class Lease
     {
@@ -121,68 +126,85 @@ public interface ByteBufferPool
 
     class Bucket
     {
+        private final Deque<ByteBuffer> _queue = new ConcurrentLinkedDeque<>();
+        private final ByteBufferPool _pool;
         private final int _capacity;
         private final AtomicInteger _space;
-        private final Queue<ByteBuffer> _queue= new ConcurrentArrayQueue<>();
 
-        public Bucket(int bufferSize,int maxSize)
+        public Bucket(ByteBufferPool pool, int bufferSize, int maxSize)
         {
-            _capacity=bufferSize;
-            _space=maxSize>0?new AtomicInteger(maxSize):null;
+            _pool = pool;
+            _capacity = bufferSize;
+            _space = maxSize > 0 ? new AtomicInteger(maxSize) : null;
         }
-    
+
+        public ByteBuffer acquire(boolean direct)
+        {
+            ByteBuffer buffer = queuePoll();
+            if (buffer == null)
+                return _pool.newByteBuffer(_capacity, direct);
+            if (_space != null)
+                _space.incrementAndGet();
+            return buffer;
+        }
+
         public void release(ByteBuffer buffer)
         {
             BufferUtil.clear(buffer);
-            if (_space==null)
-                _queue.offer(buffer);
-            else if (_space.decrementAndGet()>=0)
-                _queue.offer(buffer);
+            if (_space == null)
+                queueOffer(buffer);
+            else if (_space.decrementAndGet() >= 0)
+                queueOffer(buffer);
             else
                 _space.incrementAndGet();
         }
-    
-        public ByteBuffer acquire(boolean direct)
-        {
-            ByteBuffer buffer = _queue.poll();
-            if (buffer == null) 
-               return direct ? BufferUtil.allocateDirect(_capacity) : BufferUtil.allocate(_capacity);
-            if (_space!=null)
-                _space.incrementAndGet();
-            return buffer;        
-        }
-    
+
         public void clear()
         {
-            if (_space==null)
-                _queue.clear();
+            if (_space == null)
+            {
+                queueClear();
+            }
             else
             {
-                int s=_space.getAndSet(0);
-                while(s-->0)
+                int s = _space.getAndSet(0);
+                while (s-- > 0)
                 {
-                    if (_queue.poll()==null)
+                    if (queuePoll() == null)
                         _space.incrementAndGet();
                 }
             }
         }
-        
+
+        private void queueOffer(ByteBuffer buffer)
+        {
+            _queue.offerFirst(buffer);
+        }
+
+        private ByteBuffer queuePoll()
+        {
+            return _queue.poll();
+        }
+
+        private void queueClear()
+        {
+            _queue.clear();
+        }
+
         boolean isEmpty()
         {
             return _queue.isEmpty();
         }
-        
+
         int size()
         {
             return _queue.size();
         }
-        
+
         @Override
         public String toString()
         {
-            return String.format("Bucket@%x{%d,%d}",hashCode(),_capacity,_queue.size());
+            return String.format("Bucket@%x{%d/%d}", hashCode(), size(), _capacity);
         }
     }
-    
-    
 }

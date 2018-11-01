@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -177,8 +177,8 @@ public class HttpURI
 
     /* ------------------------------------------------------------ */
     /** Parse according to https://tools.ietf.org/html/rfc7230#section-5.3
-     * @param method
-     * @param uri
+     * @param method The method to parse the URI against (used to allow CONNECT exceptions)
+     * @param uri The URI to parse
      */
     public void parseRequestTarget(String method,String uri)
     {
@@ -608,7 +608,7 @@ public class HttpURI
     /* ------------------------------------------------------------ */
     public void decodeQueryTo(MultiMap<String> parameters)
     {
-        if (_query==_fragment)
+        if (_query==null)
             return;
         UrlEncoded.decodeUtf8To(_query,parameters);
     }
@@ -622,7 +622,7 @@ public class HttpURI
     /* ------------------------------------------------------------ */
     public void decodeQueryTo(MultiMap<String> parameters, Charset encoding) throws UnsupportedEncodingException
     {
-        if (_query==_fragment)
+        if (_query==null)
             return;
 
         if (encoding==null || StandardCharsets.UTF_8.equals(encoding))

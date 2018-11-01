@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -41,6 +41,7 @@ import java.util.StringTokenizer;
  *          a,b,...  - a list of wildcard specifications
  * </pre>
  * @param <TYPE> the Map Entry value type
+ * @deprecated
  */
 @SuppressWarnings("serial")
 public class IPAddressMap<TYPE> extends HashMap<String, TYPE>

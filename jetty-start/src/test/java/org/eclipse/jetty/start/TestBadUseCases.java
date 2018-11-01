@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -46,7 +46,7 @@ public class TestBadUseCases
         List<Object[]> ret = new ArrayList<>();
 
         ret.add(new Object[]{ "http2",
-                "Missing referenced dependency: alpn-impl/alpn-0.0.0_0",
+                "Invalid Java version",
                 new String[]{"java.version=0.0.0_0"}});
 
         ret.add(new Object[]{ "versioned-modules-too-new",

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,15 +18,14 @@
 
 package org.eclipse.jetty.security;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import org.eclipse.jetty.security.MappedLoginService.KnownUser;
 import org.eclipse.jetty.security.PropertyUserStore.UserListener;
 import org.eclipse.jetty.server.UserIdentity;
-import org.eclipse.jetty.util.Scanner;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 import org.eclipse.jetty.util.resource.Resource;
@@ -55,7 +54,6 @@ public class HashLoginService extends MappedLoginService implements UserListener
 
     private PropertyUserStore _propertyUserStore;
     private String _config;
-    private Resource _configResource;
     private boolean hotReload = false; // default is not to reload
     
     
@@ -104,28 +102,26 @@ public class HashLoginService extends MappedLoginService implements UserListener
         return _config;
     }
 
-    /* ------------------------------------------------------------ */
-    public void getConfig(String config)
-    {
-        _config = config;
-    }
 
     /* ------------------------------------------------------------ */
+    @Deprecated
     public Resource getConfigResource()
     {
-        return _configResource;
+        return null;
     }
 
     /* ------------------------------------------------------------ */
     /**
-     * Load realm users from properties file. The property file maps usernames to password specs followed by an optional comma separated list of role names.
+     * Load realm users from properties file.
+     * <p>
+     * The property file maps usernames to password specs followed by an optional comma separated list of role names.
+     * </p>
      * 
-     * @param config
-     *            Filename or url of user properties file.
+     * @param config uri or url or path to realm properties file
      */
     public void setConfig(String config)
     {
-        _config = config;
+        _config=config;
     }
     
     /**
@@ -236,7 +232,6 @@ public class HashLoginService extends MappedLoginService implements UserListener
         {
             if(LOG.isDebugEnabled())
                 LOG.debug("doStart: Starting new PropertyUserStore. PropertiesFile: " + _config + " hotReload: " + hotReload);
-            
             _propertyUserStore = new PropertyUserStore();
             _propertyUserStore.setHotReload(hotReload);
             _propertyUserStore.setConfigPath(_config);

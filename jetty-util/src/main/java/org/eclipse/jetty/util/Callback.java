@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -30,7 +30,7 @@ public interface Callback
      * Instance of Adapter that can be used when the callback methods need an empty
      * implementation without incurring in the cost of allocating a new Adapter object.
      */
-    Callback NOOP = new Callback()
+    Callback NOOP = new Callback.NonBlocking()
     {
     };
 

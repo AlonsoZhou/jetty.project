@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.jetty.http2.api.Session;
@@ -75,6 +76,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
     private final AtomicInteger sendWindow = new AtomicInteger();
     private final AtomicInteger recvWindow = new AtomicInteger();
     private final AtomicReference<CloseState> closed = new AtomicReference<>(CloseState.NOT_CLOSED);
+    private final AtomicLong bytesWritten = new AtomicLong();
     private final Scheduler scheduler;
     private final EndPoint endPoint;
     private final Generator generator;
@@ -189,6 +191,12 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
     public Generator getGenerator()
     {
         return generator;
+    }
+
+    @Override
+    public long getBytesWritten()
+    {
+        return bytesWritten.get();
     }
 
     @Override
@@ -413,8 +421,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
                     {
                         // We received a GO_AWAY, so try to write
                         // what's in the queue and then disconnect.
-                        notifyClose(this, frame);
-                        control(null, Callback.NOOP, new DisconnectFrame());
+                        notifyClose(this, frame, new DisconnectCallback());
                         return;
                     }
                     break;
@@ -454,8 +461,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
     @Override
     public void onConnectionFailure(int error, String reason)
     {
-        close(error, reason, Callback.NOOP);
-        notifyFailure(this, new IOException(String.format("%d/%s", error, reason)));
+        notifyFailure(this, new IOException(String.format("%d/%s", error, reason)), new CloseCallback(error, reason));
     }
 
     @Override
@@ -746,6 +752,8 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
             else
                 remoteStreamCount.decrementAndGet();
 
+            onStreamClosed(stream);
+
             flowControl.onStreamDestroyed(stream);
 
             if (LOG.isDebugEnabled())
@@ -934,6 +942,14 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         onConnectionFailure(ErrorCode.PROTOCOL_ERROR.code, "upgrade");
     }
 
+    protected void onStreamOpened(IStream stream)
+    {
+    }
+
+    protected void onStreamClosed(IStream stream)
+    {
+    }
+
     public void disconnect()
     {
         if (LOG.isDebugEnabled())
@@ -941,7 +957,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         endPoint.close();
     }
 
-    private void terminate()
+    private void terminate(Throwable cause)
     {
         while (true)
         {
@@ -954,7 +970,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
                 {
                     if (closed.compareAndSet(current, CloseState.CLOSED))
                     {
-                        flusher.terminate();
+                        flusher.terminate(cause);
                         for (IStream stream : streams.values())
                             stream.close();
                         streams.clear();
@@ -973,8 +989,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
 
     protected void abort(Throwable failure)
     {
-        terminate();
-        notifyFailure(this, failure);
+        notifyFailure(this, failure, new TerminateCallback(failure));
     }
 
     public boolean isDisconnected()
@@ -1036,11 +1051,11 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         }
     }
 
-    protected void notifyClose(Session session, GoAwayFrame frame)
+    protected void notifyClose(Session session, GoAwayFrame frame, Callback callback)
     {
         try
         {
-            listener.onClose(session, frame);
+            listener.onClose(session, frame, callback);
         }
         catch (Throwable x)
         {
@@ -1061,11 +1076,11 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         }
     }
 
-    protected void notifyFailure(Session session, Throwable failure)
+    protected void notifyFailure(Session session, Throwable failure, Callback callback)
     {
         try
         {
-            listener.onFailure(session, failure);
+            listener.onFailure(session, failure, callback);
         }
         catch (Throwable x)
         {
@@ -1090,6 +1105,8 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
 
     private class ControlEntry extends HTTP2Flusher.Entry
     {
+        private int bytes;
+
         private ControlEntry(Frame frame, IStream stream, Callback callback)
         {
             super(frame, stream, callback);
@@ -1099,7 +1116,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         {
             try
             {
-                generator.control(lease, frame);
+                bytes = generator.control(lease, frame);
                 if (LOG.isDebugEnabled())
                     LOG.debug("Generated {}", frame);
                 prepare();
@@ -1148,10 +1165,12 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         @Override
         public void succeeded()
         {
+            bytesWritten.addAndGet(bytes);
             switch (frame.getType())
             {
                 case HEADERS:
                 {
+                    onStreamOpened(stream);
                     HeadersFrame headersFrame = (HeadersFrame)frame;
                     if (stream.updateClose(headersFrame.isEndStream(), true))
                         removeStream(stream);
@@ -1187,7 +1206,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
                 }
                 case DISCONNECT:
                 {
-                    terminate();
+                    terminate(new ClosedChannelException());
                     break;
                 }
                 default:
@@ -1202,6 +1221,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
     private class DataEntry extends HTTP2Flusher.Entry
     {
         private int length;
+        private int bytes;
 
         private DataEntry(DataFrame frame, IStream stream, Callback callback)
         {
@@ -1239,7 +1259,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
                 if (LOG.isDebugEnabled())
                     LOG.debug("Generated {}, length/window={}/{}", frame, length, window);
 
-                generator.data(lease, (DataFrame)frame, length);
+                bytes = generator.data(lease, (DataFrame)frame, length);
                 flowControl.onDataSending(stream, length);
                 return null;
             }
@@ -1254,6 +1274,7 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         @Override
         public void succeeded()
         {
+            bytesWritten.addAndGet(bytes);
             flowControl.onDataSent(stream, length);
             // Do we have more to send ?
             DataFrame dataFrame = (DataFrame)frame;
@@ -1296,6 +1317,83 @@ public abstract class HTTP2Session extends ContainerLifeCycle implements ISessio
         public void failed(Throwable x)
         {
             promise.failed(x);
+        }
+    }
+
+    private class CloseCallback implements Callback.NonBlocking
+    {
+        private final int error;
+        private final String reason;
+
+        private CloseCallback(int error, String reason)
+        {
+            this.error = error;
+            this.reason = reason;
+        }
+
+        @Override
+        public void succeeded()
+        {
+            complete();
+        }
+
+        @Override
+        public void failed(Throwable x)
+        {
+            complete();
+        }
+
+        private void complete()
+        {
+            close(error, reason, Callback.NOOP);
+        }
+    }
+
+    private class DisconnectCallback implements Callback.NonBlocking
+    {
+        @Override
+        public void succeeded()
+        {
+            complete();
+        }
+
+        @Override
+        public void failed(Throwable x)
+        {
+            complete();
+        }
+
+        private void complete()
+        {
+            control(null, Callback.NOOP, new DisconnectFrame());
+        }
+    }
+
+    private class TerminateCallback implements Callback.NonBlocking
+    {
+        private final Throwable failure;
+
+        private TerminateCallback(Throwable failure)
+        {
+            this.failure = failure;
+        }
+
+        @Override
+        public void succeeded()
+        {
+            complete();
+        }
+
+        @Override
+        public void failed(Throwable x)
+        {
+            failure.addSuppressed(x);
+            complete();
+        }
+
+        private void complete()
+        {
+            terminate(failure);
         }
     }
 }

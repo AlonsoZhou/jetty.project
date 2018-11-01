@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -100,6 +100,8 @@ import org.eclipse.jetty.util.log.Logger;
  * to define a range of the internet addresses (e.g. 127., 10.10., 172.16.1.).
  * They also used the first "/" character of the URI pattern to separate it from the
  * internet address. Both of these features have been deprecated in the current version.
+ * @deprecated
+ * @see InetAccessHandler
  */
 public class IPAccessHandler extends HandlerWrapper
 {

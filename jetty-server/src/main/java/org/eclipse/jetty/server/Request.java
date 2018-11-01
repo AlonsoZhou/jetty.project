@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -362,13 +362,31 @@ public class Request implements HttpServletRequest
             // once extracted and may have already been extracted by getParts() or
             // by a processing happening after a form-based authentication.
             if (_contentParameters == null)
-                extractContentParameters();
+            {
+                try
+                {
+                    extractContentParameters();
+                }
+                catch(IllegalStateException | IllegalArgumentException e)
+                {
+                    throw new BadMessageException("Unable to parse form content", e);
+                }
+            }
         }
         
         // Extract query string parameters; these may be replaced by a forward()
         // and may have already been extracted by mergeQueryParameters().
         if (_queryParameters == null)
-            extractQueryParameters();
+        {
+            try
+            {
+                extractQueryParameters();
+            }
+            catch(IllegalStateException | IllegalArgumentException e)
+            {
+                throw new BadMessageException("Unable to parse URI query", e);
+            }
+        }
 
         // Do parameters need to be combined?
         if (_queryParameters==NO_PARAMS || _queryParameters.size()==0)
@@ -1085,7 +1103,7 @@ public class Request implements HttpServletRequest
         MetaData.Request metadata = _metaData;
         if (metadata==null)
             return null;
-        HttpVersion version = metadata.getVersion();
+        HttpVersion version = metadata.getHttpVersion();
         if (version==null)
             return null;
         return version.toString();
@@ -1098,7 +1116,7 @@ public class Request implements HttpServletRequest
     public HttpVersion getHttpVersion()
     {
         MetaData.Request metadata = _metaData;
-        return metadata==null?null:metadata.getVersion();
+        return metadata==null?null:metadata.getHttpVersion();
     }
 
     /* ------------------------------------------------------------ */
@@ -1247,6 +1265,8 @@ public class Request implements HttpServletRequest
     @Override
     public RequestDispatcher getRequestDispatcher(String path)
     {
+        // path is encoded, potentially with query
+        
         if (path == null || _context == null)
             return null;
 
@@ -2063,6 +2083,13 @@ public class Request implements HttpServletRequest
             metadata.setMethod(method);
     }
 
+    public void setHttpVersion(HttpVersion version)
+    {
+        MetaData.Request metadata = _metaData;
+        if (metadata!=null)
+            metadata.setHttpVersion(version);
+    }
+
     /* ------------------------------------------------------------ */
     public boolean isHead()
     {
@@ -2238,7 +2265,7 @@ public class Request implements HttpServletRequest
             _async=new AsyncContextState(state);
         AsyncContextEvent event = new AsyncContextEvent(_context,_async,state,this,servletRequest,servletResponse);
         event.setDispatchContext(getServletContext());
-        event.setDispatchPath(URIUtil.addPaths(getServletPath(),getPathInfo()));
+        event.setDispatchPath(URIUtil.encodePath(URIUtil.addPaths(getServletPath(),getPathInfo())));
         state.startAsync(event);
         return _async;
     }
@@ -2363,8 +2390,6 @@ public class Request implements HttpServletRequest
     /* ------------------------------------------------------------ */
     public void mergeQueryParameters(String oldQuery,String newQuery, boolean updateQueryString)
     {
-        // TODO  This is seriously ugly
-
         MultiMap<String> newQueryParams = null;
         // Have to assume ENCODING because we can't know otherwise.
         if (newQuery!=null)
@@ -2377,7 +2402,14 @@ public class Request implements HttpServletRequest
         if (oldQueryParams == null && oldQuery != null)
         {
             oldQueryParams = new MultiMap<>();
-            UrlEncoded.decodeTo(oldQuery, oldQueryParams, getQueryEncoding());
+            try
+            {
+                UrlEncoded.decodeTo(oldQuery, oldQueryParams, getQueryEncoding()); 
+            }
+            catch(Throwable th)
+            {
+                throw new BadMessageException(400,"Bad query encoding",th);
+            }
         }
 
         MultiMap<String> mergedQueryParams;

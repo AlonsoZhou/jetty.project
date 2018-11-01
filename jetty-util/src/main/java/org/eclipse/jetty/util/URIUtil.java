@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -472,14 +472,14 @@ public class URIUtil
 
     
     /* ------------------------------------------------------------ */
-    /** Add two URI path segments.
+    /** Add two encoded URI path segments.
      * Handles null and empty paths, path and query params (eg ?a=b or
      * ;JSESSIONID=xxx) and avoids duplicate '/'
      * @param p1 URI path segment (should be encoded)
      * @param p2 URI path segment (should be encoded)
      * @return Legally combined path segments.
      */
-    public static String addPaths(String p1, String p2)
+    public static String addEncodedPaths(String p1, String p2)
     {
         if (p1==null || p1.length()==0)
         {
@@ -524,7 +524,54 @@ public class URIUtil
 
         return buf.toString();
     }
-    
+
+    /* ------------------------------------------------------------ */
+    /** Add two Decoded URI path segments.
+     * Handles null and empty paths.  Path and query params (eg ?a=b or
+     * ;JSESSIONID=xxx) are not handled
+     * @param p1 URI path segment (should be decoded)
+     * @param p2 URI path segment (should be decoded)
+     * @return Legally combined path segments.
+     */
+    public static String addPaths(String p1, String p2)
+    {
+        if (p1==null || p1.length()==0)
+        {
+            if (p1!=null && p2==null)
+                return p1;
+            return p2;
+        }
+        if (p2==null || p2.length()==0)
+            return p1;
+        
+        boolean p1EndsWithSlash = p1.endsWith(SLASH);
+        boolean p2StartsWithSlash = p2.startsWith(SLASH);
+        
+        if (p1EndsWithSlash && p2StartsWithSlash)
+        {
+            if (p2.length()==1)
+                return p1;
+            if (p1.length()==1)
+                return p2;
+        }
+        
+        StringBuilder buf = new StringBuilder(p1.length()+p2.length()+2);
+        buf.append(p1);
+        
+        if (p1.endsWith(SLASH))
+        {
+            if (p2.startsWith(SLASH))
+                buf.setLength(buf.length()-1);
+        }
+        else
+        {
+            if (!p2.startsWith(SLASH))
+                buf.append(SLASH);
+        }
+        buf.append(p2);
+
+        return buf.toString();
+    }
     /* ------------------------------------------------------------ */
     /** Return the parent Path.
      * Treat a URI like a directory path and return the parent directory.
@@ -807,10 +854,7 @@ public class URIUtil
      */
     public static void appendSchemeHostPort(StringBuilder url,String scheme,String server, int port)
     {
-        if (server.indexOf(':')>=0&&server.charAt(0)!='[')
-            url.append(scheme).append("://").append('[').append(server).append(']');
-        else
-            url.append(scheme).append("://").append(server);
+        url.append(scheme).append("://").append(HostPort.normalizeHost(server));
 
         if (port > 0)
         {
@@ -844,10 +888,7 @@ public class URIUtil
     {
         synchronized (url)
         {
-            if (server.indexOf(':')>=0&&server.charAt(0)!='[')
-                url.append(scheme).append("://").append('[').append(server).append(']');
-            else
-                url.append(scheme).append("://").append(server);
+            url.append(scheme).append("://").append(HostPort.normalizeHost(server));
 
             if (port > 0)
             {
@@ -922,7 +963,12 @@ public class URIUtil
         return equalsIgnoreEncodings(uriA.getPath(),uriB.getPath());
     }
 
-    public static URI addDecodedPath(URI uri, String path)
+    /**
+     * @param uri A URI to add the path to
+     * @param path A decoded path element
+     * @return URI with path added.
+     */
+    public static URI addPath(URI uri, String path)
     {
         String base = uri.toASCIIString();
         StringBuilder buf = new StringBuilder(base.length()+path.length()*3);
@@ -930,7 +976,6 @@ public class URIUtil
         if (buf.charAt(base.length()-1)!='/')
             buf.append('/');
 
-        byte[] bytes=null;
         int offset=path.charAt(0)=='/'?1:0;
         encodePath(buf,path,offset);
 

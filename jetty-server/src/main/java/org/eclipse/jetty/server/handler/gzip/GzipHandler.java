@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -20,9 +20,12 @@ package org.eclipse.jetty.server.handler.gzip;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Set;
 import java.util.zip.Deflater;
 
+import javax.servlet.DispatcherType;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
@@ -30,10 +33,8 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.eclipse.jetty.http.GzipHttpContent;
 import org.eclipse.jetty.http.HttpField;
-import org.eclipse.jetty.http.HttpFields;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpMethod;
-import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.http.MimeTypes;
 import org.eclipse.jetty.http.pathmap.PathSpecSet;
 import org.eclipse.jetty.server.HttpOutput;
@@ -67,6 +68,7 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
     private int _compressionLevel=Deflater.DEFAULT_COMPRESSION;
     private boolean _checkGzExists = true;
     private boolean _syncFlush = false;
+    private EnumSet<DispatcherType> _dispatchers = EnumSet.of(DispatcherType.REQUEST);
 
     // non-static, as other GzipHandler instances may have different configurations
     private final ThreadLocal<Deflater> _deflater = new ThreadLocal<>();
@@ -126,6 +128,25 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
     {
         for (String m : methods)
             _methods.exclude(m);
+    }
+
+    
+    /* ------------------------------------------------------------ */
+    public EnumSet<DispatcherType> getDispatcherTypes()
+    {
+        return _dispatchers;
+    }
+
+    /* ------------------------------------------------------------ */
+    public void setDispatcherTypes(EnumSet<DispatcherType> dispatchers)
+    {
+        _dispatchers = dispatchers;
+    }
+
+    /* ------------------------------------------------------------ */
+    public void setDispatcherTypes(DispatcherType... dispatchers)
+    {
+        _dispatchers = EnumSet.copyOf(Arrays.asList(dispatchers));
     }
 
     /* ------------------------------------------------------------ */
@@ -351,15 +372,16 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
 
     /* ------------------------------------------------------------ */
     /**
-     * Get the minimum reponse size.
+     * Get the minimum response size.
      *
-     * @return minimum reponse size
+     * @return minimum response size
      */
     public int getMinGzipSize()
     {
         return _minGzipSize;
     }
 
+    /* ------------------------------------------------------------ */
     protected HttpField getVaryField()
     {
         return _vary;
@@ -376,8 +398,15 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
         String path = context==null?baseRequest.getRequestURI():URIUtil.addPaths(baseRequest.getServletPath(),baseRequest.getPathInfo());
         LOG.debug("{} handle {} in {}",this,baseRequest,context);
 
-        HttpOutput out = baseRequest.getResponse().getHttpOutput();
+        if (!_dispatchers.contains(baseRequest.getDispatcherType()))
+        {
+            LOG.debug("{} excluded by dispatcherType {}",this,baseRequest.getDispatcherType());
+            _handler.handle(target,baseRequest, request, response);
+            return;
+        }
+
         // Are we already being gzipped?
+        HttpOutput out = baseRequest.getResponse().getHttpOutput();
         HttpOutput.Interceptor interceptor = out.getInterceptor();
         while (interceptor!=null)
         {
@@ -408,7 +437,7 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
         }
 
         // Exclude non compressible mime-types known from URI extension. - no Vary because no matter what client, this URI is always excluded
-        String mimeType = context==null?null:context.getMimeType(path);
+        String mimeType = context==null?MimeTypes.getDefaultMimeByExtension(path):context.getMimeType(path);
         if (mimeType!=null)
         {
             mimeType = MimeTypes.getContentTypeWithoutCharset(mimeType);
@@ -454,11 +483,21 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
             }
         }
 
-        // install interceptor and handle
-        out.setInterceptor(new GzipHttpOutputInterceptor(this,getVaryField(),baseRequest.getHttpChannel(),out.getInterceptor(),isSyncFlush()));
+        HttpOutput.Interceptor orig_interceptor = out.getInterceptor();
+        try
+        {
+            // install interceptor and handle
+            out.setInterceptor(new GzipHttpOutputInterceptor(this,getVaryField(),baseRequest.getHttpChannel(),orig_interceptor,isSyncFlush()));
 
-        if (_handler!=null)
-            _handler.handle(target,baseRequest, request, response);
+            if (_handler!=null)
+                _handler.handle(target,baseRequest, request, response);
+        }
+        finally
+        {
+            // reset interceptor if request not handled
+            if (!baseRequest.isHandled() && !baseRequest.isAsyncStarted())
+                out.setInterceptor(orig_interceptor);
+        }
     }
 
     /* ------------------------------------------------------------ */
@@ -503,9 +542,13 @@ public class GzipHandler extends HandlerWrapper implements GzipFactory
     @Override
     public void recycle(Deflater deflater)
     {
-        deflater.reset();
         if (_deflater.get()==null)
+        {
+            deflater.reset();
             _deflater.set(deflater);
+        }
+        else
+            deflater.end();
     }
 
     /* ------------------------------------------------------------ */

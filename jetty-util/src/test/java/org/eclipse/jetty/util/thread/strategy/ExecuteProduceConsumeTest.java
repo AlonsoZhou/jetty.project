@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -23,9 +23,8 @@ import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
 
-import org.eclipse.jetty.util.BlockingArrayQueue;
-import org.eclipse.jetty.util.ConcurrentArrayQueue;
 import org.eclipse.jetty.util.thread.ExecutionStrategy.Producer;
 import org.hamcrest.Matchers;
 import org.junit.After;
@@ -37,8 +36,8 @@ public class ExecuteProduceConsumeTest
 {
     private static final Runnable NULLTASK = () -> {};
 
-    private final BlockingQueue<Runnable> _produce = new BlockingArrayQueue<>();
-    private final Queue<Runnable> _executions = new ConcurrentArrayQueue<>();
+    private final BlockingQueue<Runnable> _produce = new LinkedBlockingQueue<>();
+    private final Queue<Runnable> _executions = new LinkedBlockingQueue<>();
     private ExecuteProduceConsume _ewyk;
     private volatile Thread _producer;
 

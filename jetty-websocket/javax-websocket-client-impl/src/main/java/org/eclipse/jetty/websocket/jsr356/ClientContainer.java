@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -190,7 +190,7 @@ public class ClientContainer extends ContainerLifeCycle implements WebSocketCont
     protected void doStart() throws Exception
     {
         super.doStart();
-
+        
         // Initialize the default decoder / encoder factories
         EmptyClientEndpointConfig empty = new EmptyClientEndpointConfig();
         this.decoderFactory.init(empty);

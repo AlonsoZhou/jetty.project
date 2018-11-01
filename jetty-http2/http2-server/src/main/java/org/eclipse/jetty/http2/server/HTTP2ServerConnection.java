@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,11 +18,15 @@
 
 package org.eclipse.jetty.http2.server;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpField;
@@ -52,16 +56,18 @@ import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.util.B64Code;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.ConcurrentArrayQueue;
+import org.eclipse.jetty.util.CountingCallback;
 import org.eclipse.jetty.util.TypeUtil;
 import org.eclipse.jetty.util.thread.ExecutionStrategy;
 
 public class HTTP2ServerConnection extends HTTP2Connection implements Connection.UpgradeTo
 {
-    private final Queue<HttpChannelOverHTTP2> channels = new ConcurrentArrayQueue<>();
+    private final Queue<HttpChannelOverHTTP2> channels = new ArrayDeque<>();
+    private final List<Frame> upgradeFrames = new ArrayList<>();
+    private final AtomicLong totalRequests = new AtomicLong();
+    private final AtomicLong totalResponses = new AtomicLong();
     private final ServerSessionListener listener;
     private final HttpConfiguration httpConfig;
-    private final List<Frame> upgradeFrames = new ArrayList<>();
 
     public HTTP2ServerConnection(ByteBufferPool byteBufferPool, Executor executor, EndPoint endPoint, HttpConfiguration httpConfig, ServerParser parser, ISession session, int inputBufferSize, ServerSessionListener listener)
     {
@@ -73,6 +79,18 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
         super(byteBufferPool, executor, endPoint, parser, session, inputBufferSize, executionFactory);
         this.listener = listener;
         this.httpConfig = httpConfig;
+    }
+
+    @Override
+    public int getMessagesIn()
+    {
+        return totalRequests.intValue();
+    }
+
+    @Override
+    public int getMessagesOut()
+    {
+        return totalResponses.intValue();
     }
 
     @Override
@@ -125,26 +143,42 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
         if (LOG.isDebugEnabled())
             LOG.debug("Processing {} on {}", frame, stream);
         HttpChannelOverHTTP2 channel = (HttpChannelOverHTTP2)stream.getAttribute(IStream.CHANNEL_ATTRIBUTE);
-        Runnable task = channel.onRequestContent(frame, callback);
-        if (task != null)
-            offerTask(task, false);
+        if (channel != null)
+        {
+            Runnable task = channel.onRequestContent(frame, callback);
+            if (task != null)
+                offerTask(task, false);
+        }
+        else
+        {
+            callback.failed(new IOException("channel_not_found"));
+        }
     }
 
     public boolean onStreamTimeout(IStream stream, Throwable failure)
     {
         HttpChannelOverHTTP2 channel = (HttpChannelOverHTTP2)stream.getAttribute(IStream.CHANNEL_ATTRIBUTE);
-        boolean result = !channel.isRequestHandled();
+        boolean result = channel != null && channel.onStreamTimeout(failure, task -> offerTask(task, true));
         if (LOG.isDebugEnabled())
-            LOG.debug("{} idle timeout on {}: {}", result ? "Processing" : "Ignoring", stream, failure);
+            LOG.debug("{} idle timeout on {}: {}", result ? "Processed" : "Ignored", stream, failure);
         return result;
     }
 
-    public void onStreamFailure(IStream stream, Throwable failure)
+    public void onStreamFailure(IStream stream, Throwable failure, Callback callback)
     {
         if (LOG.isDebugEnabled())
             LOG.debug("Processing failure on {}: {}", stream, failure);
         HttpChannelOverHTTP2 channel = (HttpChannelOverHTTP2)stream.getAttribute(IStream.CHANNEL_ATTRIBUTE);
-        channel.onFailure(failure);
+        if (channel != null)
+        {
+            Runnable task = channel.onFailure(failure, callback);
+            if (task != null)
+                offerTask(task, true);
+        }
+        else
+        {
+            callback.succeeded();
+        }
     }
 
     public boolean onSessionTimeout(Throwable failure)
@@ -154,20 +188,30 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
         for (Stream stream : session.getStreams())
         {
             HttpChannelOverHTTP2 channel = (HttpChannelOverHTTP2)stream.getAttribute(IStream.CHANNEL_ATTRIBUTE);
-            result &= !channel.isRequestHandled();
+            if (channel != null)
+                result &= channel.isRequestIdle();
         }
         if (LOG.isDebugEnabled())
-            LOG.debug("{} idle timeout on {}: {}", result ? "Processing" : "Ignoring", session, failure);
+            LOG.debug("{} idle timeout on {}: {}", result ? "Processed" : "Ignored", session, failure);
         return result;
     }
 
-    public void onSessionFailure(Throwable failure)
+    public void onSessionFailure(Throwable failure, Callback callback)
     {
         ISession session = getSession();
         if (LOG.isDebugEnabled())
             LOG.debug("Processing failure on {}: {}", session, failure);
-        for (Stream stream : session.getStreams())
-            onStreamFailure((IStream)stream, failure);
+        Collection<Stream> streams = session.getStreams();
+        if (streams.isEmpty())
+        {
+            callback.succeeded();
+        }
+        else
+        {
+            CountingCallback counter = new CountingCallback(callback, streams.size());
+            for (Stream stream : streams)
+                onStreamFailure((IStream)stream, failure, counter);
+        }
     }
 
     public void push(Connector connector, IStream stream, MetaData.Request request)
@@ -182,7 +226,7 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
 
     private HttpChannelOverHTTP2 provideHttpChannel(Connector connector, IStream stream)
     {
-        HttpChannelOverHTTP2 channel = channels.poll();
+        HttpChannelOverHTTP2 channel = pollChannel();
         if (channel != null)
         {
             channel.getHttpTransport().setStream(stream);
@@ -193,12 +237,33 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
         {
             HttpTransportOverHTTP2 transport = new HttpTransportOverHTTP2(connector, this);
             transport.setStream(stream);
-            channel = new ServerHttpChannelOverHTTP2(connector, httpConfig, getEndPoint(), transport);
+            channel = newServerHttpChannelOverHTTP2(connector, httpConfig, transport);
             if (LOG.isDebugEnabled())
                 LOG.debug("Creating channel {} for {}", channel, this);
         }
         stream.setAttribute(IStream.CHANNEL_ATTRIBUTE, channel);
         return channel;
+    }
+
+    protected ServerHttpChannelOverHTTP2 newServerHttpChannelOverHTTP2(Connector connector, HttpConfiguration httpConfig, HttpTransportOverHTTP2 transport)
+    {
+        return new ServerHttpChannelOverHTTP2(connector, httpConfig, getEndPoint(), transport);
+    }
+
+    private void offerChannel(HttpChannelOverHTTP2 channel)
+    {
+        synchronized (this)
+        {
+            channels.offer(channel);
+        }
+    }
+
+    private HttpChannelOverHTTP2 pollChannel()
+    {
+        synchronized (this)
+        {
+            return channels.poll();
+        }
     }
 
     public boolean upgrade(Request request)
@@ -235,7 +300,7 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
         return true;
     }
 
-    private class ServerHttpChannelOverHTTP2 extends HttpChannelOverHTTP2 implements ExecutionStrategy.Rejectable
+    protected class ServerHttpChannelOverHTTP2 extends HttpChannelOverHTTP2 implements ExecutionStrategy.Rejectable
     {
         public ServerHttpChannelOverHTTP2(Connector connector, HttpConfiguration configuration, EndPoint endPoint, HttpTransportOverHTTP2 transport)
         {
@@ -243,19 +308,27 @@ public class HTTP2ServerConnection extends HTTP2Connection implements Connection
         }
 
         @Override
-        public void recycle()
+        public Runnable onRequest(HeadersFrame frame)
         {
-            getStream().removeAttribute(IStream.CHANNEL_ATTRIBUTE);
-            super.recycle();
-            channels.offer(this);
+            totalRequests.incrementAndGet();
+            return super.onRequest(frame);
         }
 
         @Override
         public void onCompleted()
         {
+            totalResponses.incrementAndGet();
             super.onCompleted();
             if (!getStream().isReset())
                 recycle();
+        }
+
+        @Override
+        public void recycle()
+        {
+            getStream().removeAttribute(IStream.CHANNEL_ATTRIBUTE);
+            super.recycle();
+            offerChannel(this);
         }
 
         @Override

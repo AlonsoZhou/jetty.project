@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -612,9 +612,9 @@ public class HashSessionManager extends AbstractSessionManager
                     __log.debug(error);
                 }
             }
-            else
+            else if (_savePeriodMs == 0)
             {
-                // delete successfully restored file
+                // delete successfully restored file if not saving periodically
                 file.delete();
             }
         }

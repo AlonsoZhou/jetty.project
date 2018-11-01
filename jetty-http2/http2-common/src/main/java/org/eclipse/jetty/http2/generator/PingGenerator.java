@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -35,13 +35,13 @@ public class PingGenerator extends FrameGenerator
     }
 
     @Override
-    public void generate(ByteBufferPool.Lease lease, Frame frame)
+    public int generate(ByteBufferPool.Lease lease, Frame frame)
     {
         PingFrame pingFrame = (PingFrame)frame;
-        generatePing(lease, pingFrame.getPayload(), pingFrame.isReply());
+        return generatePing(lease, pingFrame.getPayload(), pingFrame.isReply());
     }
 
-    public void generatePing(ByteBufferPool.Lease lease, byte[] payload, boolean reply)
+    public int generatePing(ByteBufferPool.Lease lease, byte[] payload, boolean reply)
     {
         if (payload.length != PingFrame.PING_LENGTH)
             throw new IllegalArgumentException("Invalid payload length: " + payload.length);
@@ -52,5 +52,7 @@ public class PingGenerator extends FrameGenerator
 
         BufferUtil.flipToFlush(header, 0);
         lease.append(header, true);
+
+        return Frame.HEADER_LENGTH + PingFrame.PING_LENGTH;
     }
 }

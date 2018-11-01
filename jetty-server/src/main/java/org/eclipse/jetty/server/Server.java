@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,6 +18,7 @@
 
 package org.eclipse.jetty.server;
 
+
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -29,6 +30,7 @@ import java.util.Date;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
@@ -66,6 +68,7 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.eclipse.jetty.util.thread.ShutdownThread;
 import org.eclipse.jetty.util.thread.ThreadPool;
 import org.eclipse.jetty.util.thread.ThreadPool.SizedThreadPool;
+
 
 /* ------------------------------------------------------------ */
 /** Jetty HTTP Servlet Server.
@@ -342,7 +345,10 @@ public class Server extends HandlerWrapper implements Attributes
         //Start a thread waiting to receive "stop" commands.
         ShutdownMonitor.getInstance().start(); // initialize
 
-        LOG.info("jetty-" + getVersion());
+        String gitHash = Jetty.GIT_HASH;
+        String timestamp = Jetty.BUILD_TIMESTAMP;
+
+        LOG.info("jetty-{}, build timestamp: {}, git hash: {}", getVersion(), timestamp, gitHash);
         if (!Jetty.STABLE)
         {
             LOG.warn("THIS IS NOT A STABLE RELEASE! DO NOT USE IN PRODUCTION!");
@@ -350,29 +356,39 @@ public class Server extends HandlerWrapper implements Attributes
         }
         
         HttpGenerator.setJettyVersion(HttpConfiguration.SERVER_VERSION);
-        MultiException mex=new MultiException();
+
 
         // check size of thread pool
         SizedThreadPool pool = getBean(SizedThreadPool.class);
         int max=pool==null?-1:pool.getMaxThreads();
         int selectors=0;
         int acceptors=0;
-        if (mex.size()==0)
-        {
-            for (Connector connector : _connectors)
-            {
-                if (connector instanceof AbstractConnector)
-                    acceptors+=((AbstractConnector)connector).getAcceptors();
 
-                if (connector instanceof ServerConnector)
-                    selectors+=((ServerConnector)connector).getSelectorManager().getSelectorCount();
-            }
+        for (Connector connector : _connectors)
+        {
+            if (!(connector instanceof AbstractConnector))
+                continue;
+
+            AbstractConnector abstractConnector = (AbstractConnector) connector;
+            Executor connectorExecutor = connector.getExecutor();
+
+            if (connectorExecutor != pool)
+                // Do not count the selectors and acceptors from this connector at server level, because connector uses dedicated executor.
+                continue;
+
+            acceptors += abstractConnector.getAcceptors();
+
+            if (connector instanceof ServerConnector)
+                selectors+=((ServerConnector)connector).getSelectorManager().getSelectorCount();
+
         }
+
 
         int needed=1+selectors+acceptors;
         if (max>0 && needed>max)
             throw new IllegalStateException(String.format("Insufficient threads: max=%d < needed(acceptors=%d + selectors=%d + request=1)",max,acceptors,selectors));
 
+        MultiException mex=new MultiException();
         try
         {
             super.doStart();
@@ -552,7 +568,7 @@ public class Server extends HandlerWrapper implements Attributes
             // this is a dispatch with a path
             ServletContext context=event.getServletContext();
             String query=baseRequest.getQueryString();
-            baseRequest.setURIPathQuery(URIUtil.addPaths(context==null?null:context.getContextPath(), path));
+            baseRequest.setURIPathQuery(URIUtil.addEncodedPaths(context==null?null:URIUtil.encodePath(context.getContextPath()), path));
             HttpURI uri = baseRequest.getHttpURI();
             baseRequest.setPathInfo(uri.getDecodedPath());
             if (uri.getQuery()!=null)

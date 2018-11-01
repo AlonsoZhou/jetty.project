@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -59,6 +59,7 @@ import org.eclipse.jetty.http.HttpScheme;
 import org.eclipse.jetty.io.ByteBufferPool;
 import org.eclipse.jetty.io.ClientConnectionFactory;
 import org.eclipse.jetty.io.MappedByteBufferPool;
+import org.eclipse.jetty.io.ssl.SslClientConnectionFactory;
 import org.eclipse.jetty.util.Fields;
 import org.eclipse.jetty.util.Jetty;
 import org.eclipse.jetty.util.Promise;
@@ -240,7 +241,6 @@ public class HttpClient extends ContainerLifeCycle
     @Override
     protected void doStop() throws Exception
     {
-        cookieStore.removeAll();
         decoderFactories.clear();
         handlers.clear();
 
@@ -459,16 +459,33 @@ public class HttpClient extends ContainerLifeCycle
                     HttpHeader.PROXY_AUTHORIZATION == header)
                 continue;
 
+            String name = field.getName();
             String value = field.getValue();
-            if (!newRequest.getHeaders().contains(header, value))
-                newRequest.header(field.getName(), value);
+            if (!newRequest.getHeaders().contains(name, value))
+                newRequest.header(name, value);
         }
         return newRequest;
     }
 
     protected HttpRequest newHttpRequest(HttpConversation conversation, URI uri)
     {
-        return new HttpRequest(this, conversation, uri);
+        return new HttpRequest(this, conversation, checkHost(uri));
+    }
+
+    /**
+     * <p>Checks {@code uri} for the host to be non-null host.</p>
+     * <p>URIs built from strings that have an internationalized domain name (IDN)
+     * are parsed without errors, but {@code uri.getHost()} returns null.</p>
+     *
+     * @param uri the URI to check for non-null host
+     * @return the same {@code uri} if the host is non-null
+     * @throws IllegalArgumentException if the host is null
+     */
+    private URI checkHost(URI uri)
+    {
+        if (uri.getHost() == null)
+            throw new IllegalArgumentException(String.format("Invalid URI host: null (authority: %s)", uri.getRawAuthority()));
+        return uri;
     }
 
     /**
@@ -564,17 +581,11 @@ public class HttpClient extends ContainerLifeCycle
                 context.put(HttpClientTransport.HTTP_CONNECTION_PROMISE_CONTEXT_KEY, new Promise.Wrapper<Connection>(promise)
                 {
                     @Override
-                    public void succeeded(Connection result)
-                    {
-                        getPromise().succeeded(result);
-                    }
-
-                    @Override
                     public void failed(Throwable x)
                     {
                         int nextIndex = index + 1;
                         if (nextIndex == socketAddresses.size())
-                            getPromise().failed(x);
+                            super.failed(x);
                         else
                             connect(socketAddresses, nextIndex, context);
                     }
@@ -1048,6 +1059,11 @@ public class HttpClient extends ContainerLifeCycle
     public boolean isDefaultPort(String scheme, int port)
     {
         return HttpScheme.HTTPS.is(scheme) ? port == 443 : port == 80;
+    }
+
+    protected ClientConnectionFactory newSslClientConnectionFactory(ClientConnectionFactory connectionFactory)
+    {
+        return new SslClientConnectionFactory(getSslContextFactory(), getByteBufferPool(), getExecutor(), connectionFactory);
     }
 
     private class ContentDecoderFactorySet implements Set<ContentDecoder.Factory>

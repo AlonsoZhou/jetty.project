@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -53,6 +53,7 @@ import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
 import javax.servlet.ServletException;
+import javax.servlet.ServletInputStream;
 import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
@@ -71,9 +72,12 @@ import org.eclipse.jetty.client.api.Result;
 import org.eclipse.jetty.client.http.HttpDestinationOverHTTP;
 import org.eclipse.jetty.client.util.BufferingResponseListener;
 import org.eclipse.jetty.client.util.BytesContentProvider;
+import org.eclipse.jetty.client.util.DeferredContentProvider;
 import org.eclipse.jetty.client.util.InputStreamResponseListener;
 import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpHeaderValue;
 import org.eclipse.jetty.http.HttpMethod;
+import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
@@ -186,9 +190,12 @@ public class ProxyServletTest
     @After
     public void dispose() throws Exception
     {
-        client.stop();
-        proxy.stop();
-        server.stop();
+        if (client != null)
+            client.stop();
+        if (proxy != null)
+            proxy.stop();
+        if (server != null)
+            server.stop();
     }
 
     @Test
@@ -1067,10 +1074,10 @@ public class ProxyServletTest
         Response response = listener.get(5, TimeUnit.SECONDS);
         Assert.assertEquals(504, response.getStatus());
 
-        // Make sure there is no content, as the proxy-to-client response has been reset.
+        // Make sure there is error page content, as the proxy-to-client response has been reset.
         InputStream input = listener.getInputStream();
-        Assert.assertEquals(-1, input.read());
-
+        String body = IO.toString(input);
+        Assert.assertThat(body,Matchers.containsString("HTTP ERROR: 504"));
         chunk1Latch.countDown();
 
         // Result succeeds because a 504 is a valid HTTP response.
@@ -1230,5 +1237,227 @@ public class ProxyServletTest
         Assert.assertEquals(200, response.getStatus());
     }
 
-    // TODO: test proxy authentication
+    @Test
+    public void testExpect100ContinueRespond100Continue() throws Exception
+    {
+        CountDownLatch serverLatch1 = new CountDownLatch(1);
+        CountDownLatch serverLatch2 = new CountDownLatch(1);
+        startServer(new HttpServlet()
+        {
+            @Override
+            protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
+            {
+                serverLatch1.countDown();
+
+                try
+                {
+                    serverLatch2.await(5, TimeUnit.SECONDS);
+                }
+                catch (Throwable x)
+                {
+                    throw new InterruptedIOException();
+                }
+
+                // Send the 100 Continue.
+                ServletInputStream input = request.getInputStream();
+
+                // Echo the content.
+                IO.copy(input, response.getOutputStream());
+            }
+        });
+        startProxy();
+        startClient();
+
+        byte[] content = new byte[1024];
+        CountDownLatch contentLatch = new CountDownLatch(1);
+        CountDownLatch clientLatch = new CountDownLatch(1);
+        client.newRequest("localhost", serverConnector.getLocalPort())
+                .header(HttpHeader.EXPECT, HttpHeaderValue.CONTINUE.asString())
+                .content(new BytesContentProvider(content))
+                .onRequestContent((request, buffer) -> contentLatch.countDown())
+                .send(new BufferingResponseListener()
+                {
+                    @Override
+                    public void onComplete(Result result)
+                    {
+                        if (result.isSucceeded())
+                        {
+                            if (result.getResponse().getStatus() == HttpStatus.OK_200)
+                            {
+                                if (Arrays.equals(content, getContent()))
+                                    clientLatch.countDown();
+                            }
+                        }
+                    }
+                });
+
+        // Wait until we arrive on the server.
+        Assert.assertTrue(serverLatch1.await(5, TimeUnit.SECONDS));
+        // The client should not send the content yet.
+        Assert.assertFalse(contentLatch.await(1, TimeUnit.SECONDS));
+
+        // Make the server send the 100 Continue.
+        serverLatch2.countDown();
+
+        // The client has sent the content.
+        Assert.assertTrue(contentLatch.await(5, TimeUnit.SECONDS));
+        Assert.assertTrue(clientLatch.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    public void testExpect100ContinueRespond100ContinueDelayedRequestContent() throws Exception
+    {
+        startServer(new HttpServlet()
+        {
+            @Override
+            protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
+            {
+                // Send the 100 Continue.
+                ServletInputStream input = request.getInputStream();
+                // Echo the content.
+                IO.copy(input, response.getOutputStream());
+            }
+        });
+        startProxy();
+        startClient();
+
+        byte[] content = new byte[1024];
+        new Random().nextBytes(content);
+        int chunk1 = content.length / 2;
+        DeferredContentProvider contentProvider = new DeferredContentProvider();
+        contentProvider.offer(ByteBuffer.wrap(content, 0, chunk1));
+        CountDownLatch clientLatch = new CountDownLatch(1);
+        client.newRequest("localhost", serverConnector.getLocalPort())
+                .header(HttpHeader.EXPECT, HttpHeaderValue.CONTINUE.asString())
+                .content(contentProvider)
+                .send(new BufferingResponseListener()
+                {
+                    @Override
+                    public void onComplete(Result result)
+                    {
+                        if (result.isSucceeded())
+                        {
+                            if (result.getResponse().getStatus() == HttpStatus.OK_200)
+                            {
+                                if (Arrays.equals(content, getContent()))
+                                    clientLatch.countDown();
+                            }
+                        }
+                    }
+                });
+
+        // Wait a while and then offer more content.
+        Thread.sleep(1000);
+        contentProvider.offer(ByteBuffer.wrap(content, chunk1, content.length - chunk1));
+        contentProvider.close();
+
+        Assert.assertTrue(clientLatch.await(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    public void testExpect100ContinueRespond100ContinueSomeRequestContentThenFailure() throws Exception
+    {
+        CountDownLatch serverLatch = new CountDownLatch(1);
+        startServer(new HttpServlet()
+        {
+            @Override
+            protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
+            {
+                // Send the 100 Continue.
+                ServletInputStream input = request.getInputStream();
+                try
+                {
+                    // Echo the content.
+                    IO.copy(input, response.getOutputStream());
+                }
+                catch (IOException x)
+                {
+                    serverLatch.countDown();
+                }
+            }
+        });
+        startProxy();
+        startClient();
+
+        long idleTimeout = 1000;
+        client.setIdleTimeout(idleTimeout);
+
+        byte[] content = new byte[1024];
+        new Random().nextBytes(content);
+        int chunk1 = content.length / 2;
+        DeferredContentProvider contentProvider = new DeferredContentProvider();
+        contentProvider.offer(ByteBuffer.wrap(content, 0, chunk1));
+        CountDownLatch clientLatch = new CountDownLatch(1);
+        client.newRequest("localhost", serverConnector.getLocalPort())
+                .header(HttpHeader.EXPECT, HttpHeaderValue.CONTINUE.asString())
+                .content(contentProvider)
+                .send(result ->
+                {
+                    if (result.isFailed())
+                        clientLatch.countDown();
+                });
+
+        // Wait more than the idle timeout to break the connection.
+        Thread.sleep(2 * idleTimeout);
+
+        Assert.assertTrue(serverLatch.await(555, TimeUnit.SECONDS));
+        Assert.assertTrue(clientLatch.await(555, TimeUnit.SECONDS));
+    }
+
+    @Test
+    public void testExpect100ContinueRespond417ExpectationFailed() throws Exception
+    {
+        CountDownLatch serverLatch1 = new CountDownLatch(1);
+        CountDownLatch serverLatch2 = new CountDownLatch(1);
+        startServer(new HttpServlet()
+        {
+            @Override
+            protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
+            {
+                serverLatch1.countDown();
+
+                try
+                {
+                    serverLatch2.await(5, TimeUnit.SECONDS);
+                }
+                catch (Throwable x)
+                {
+                    throw new InterruptedIOException();
+                }
+
+                // Send the 417 Expectation Failed.
+                response.setStatus(HttpStatus.EXPECTATION_FAILED_417);
+            }
+        });
+        startProxy();
+        startClient();
+
+        byte[] content = new byte[1024];
+        CountDownLatch contentLatch = new CountDownLatch(1);
+        CountDownLatch clientLatch = new CountDownLatch(1);
+        client.newRequest("localhost", serverConnector.getLocalPort())
+                .header(HttpHeader.EXPECT, HttpHeaderValue.CONTINUE.asString())
+                .content(new BytesContentProvider(content))
+                .onRequestContent((request, buffer) -> contentLatch.countDown())
+                .send(result ->
+                {
+                    if (result.isFailed())
+                    {
+                        if (result.getResponse().getStatus() == HttpStatus.EXPECTATION_FAILED_417)
+                            clientLatch.countDown();
+                    }
+                });
+
+        // Wait until we arrive on the server.
+        Assert.assertTrue(serverLatch1.await(5, TimeUnit.SECONDS));
+        // The client should not send the content yet.
+        Assert.assertFalse(contentLatch.await(1, TimeUnit.SECONDS));
+
+        // Make the server send the 417 Expectation Failed.
+        serverLatch2.countDown();
+
+        // The client should not send the content.
+        Assert.assertFalse(contentLatch.await(1, TimeUnit.SECONDS));
+        Assert.assertTrue(clientLatch.await(5, TimeUnit.SECONDS));
+    }
 }

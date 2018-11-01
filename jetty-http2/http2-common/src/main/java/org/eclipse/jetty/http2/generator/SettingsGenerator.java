@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -36,13 +36,13 @@ public class SettingsGenerator extends FrameGenerator
     }
 
     @Override
-    public void generate(ByteBufferPool.Lease lease, Frame frame)
+    public int generate(ByteBufferPool.Lease lease, Frame frame)
     {
         SettingsFrame settingsFrame = (SettingsFrame)frame;
-        generateSettings(lease, settingsFrame.getSettings(), settingsFrame.isReply());
+        return generateSettings(lease, settingsFrame.getSettings(), settingsFrame.isReply());
     }
 
-    public void generateSettings(ByteBufferPool.Lease lease, Map<Integer, Integer> settings, boolean reply)
+    public int generateSettings(ByteBufferPool.Lease lease, Map<Integer, Integer> settings, boolean reply)
     {
         // Two bytes for the identifier, four bytes for the value.
         int entryLength = 2 + 4;
@@ -60,5 +60,7 @@ public class SettingsGenerator extends FrameGenerator
 
         BufferUtil.flipToFlush(header, 0);
         lease.append(header, true);
+
+        return Frame.HEADER_LENGTH + length;
     }
 }

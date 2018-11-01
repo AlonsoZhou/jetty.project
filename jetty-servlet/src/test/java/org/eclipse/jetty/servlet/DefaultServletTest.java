@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,6 +18,11 @@
 
 package org.eclipse.jetty.servlet;
 
+import static org.hamcrest.CoreMatchers.anyOf;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -26,7 +31,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.EnumSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,9 +42,11 @@ import javax.servlet.FilterConfig;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
+import javax.servlet.http.HttpServletResponse;
 
 import org.eclipse.jetty.http.DateGenerator;
 import org.eclipse.jetty.http.HttpContent;
+import org.eclipse.jetty.http.HttpTester;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.LocalConnector;
 import org.eclipse.jetty.server.ResourceContentFactory;
@@ -241,7 +247,7 @@ public class DefaultServletTest
         assertTrue(wackyDir.mkdirs());
 
         /* create some content outside of the docroot */
-        File sekret = testdir.getFile("sekret");
+        File sekret = testdir.getPathFile("sekret").toFile();
         assertTrue(sekret.mkdirs());
         File pass = new File(sekret, "pass");
         createFile(pass, "Sssh, you shouldn't be seeing this");
@@ -327,11 +333,13 @@ public class DefaultServletTest
         testdir.ensureEmpty();
         File resBase = testdir.getPathFile("docroot").toFile();
         FS.ensureDirExists(resBase);
-        File inde = new File(resBase, "index.htm");
-        File index = new File(resBase, "index.html");
+
+        File dir = new File(resBase, "dir");
+        assertTrue(dir.mkdirs());
+        File inde = new File(dir, "index.htm");
+        File index = new File(dir, "index.html");
 
         String resBasePath = resBase.getAbsolutePath();
-
         ServletHolder defholder = context.addServlet(DefaultServlet.class, "/");
         defholder.setInitParameter("dirAllowed", "false");
         defholder.setInitParameter("redirectWelcome", "false");
@@ -345,25 +353,98 @@ public class DefaultServletTest
         @SuppressWarnings("unused")
         ServletHolder jspholder = context.addServlet(NoJspServlet.class, "*.jsp");
 
-        String response = connector.getResponses("GET /context/ HTTP/1.0\r\n\r\n");
+        String response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
         assertResponseContains("403", response);
 
         createFile(index, "<h1>Hello Index</h1>");
-        response = connector.getResponses("GET /context/ HTTP/1.0\r\n\r\n");
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
         assertResponseContains("<h1>Hello Index</h1>", response);
 
         createFile(inde, "<h1>Hello Inde</h1>");
-        response = connector.getResponses("GET /context/ HTTP/1.0\r\n\r\n");
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
         assertResponseContains("<h1>Hello Index</h1>", response);
 
         assertTrue(index.delete());
-        response = connector.getResponses("GET /context/ HTTP/1.0\r\n\r\n");
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
         assertResponseContains("<h1>Hello Inde</h1>", response);
 
         assertTrue(inde.delete());
-        response = connector.getResponses("GET /context/ HTTP/1.0\r\n\r\n");
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
         assertResponseContains("403", response);
     }
+
+    @Test
+    public void testWelcomeRedirect() throws Exception
+    {
+        testdir.ensureEmpty();
+        File resBase = testdir.getPathFile("docroot").toFile();
+        FS.ensureDirExists(resBase);
+
+        File dir = new File(resBase, "dir");
+        assertTrue(dir.mkdirs());
+        File inde = new File(dir, "index.htm");
+        File index = new File(dir, "index.html");
+
+        String resBasePath = resBase.getAbsolutePath();
+        ServletHolder defholder = context.addServlet(DefaultServlet.class, "/");
+        defholder.setInitParameter("dirAllowed", "false");
+        defholder.setInitParameter("redirectWelcome", "true");
+        defholder.setInitParameter("welcomeServlets", "false");
+        defholder.setInitParameter("gzip", "false");
+        defholder.setInitParameter("resourceBase", resBasePath);
+        defholder.setInitParameter("maxCacheSize", "1024000");
+        defholder.setInitParameter("maxCachedFileSize", "512000");
+        defholder.setInitParameter("maxCachedFiles", "100");
+
+        @SuppressWarnings("unused")
+        ServletHolder jspholder = context.addServlet(NoJspServlet.class, "*.jsp");
+
+        String response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
+        assertResponseContains("403", response);
+
+        createFile(index, "<h1>Hello Index</h1>");
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
+        assertResponseContains("Location: http://0.0.0.0/context/dir/index.html", response);
+
+        createFile(inde, "<h1>Hello Inde</h1>");
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
+        assertResponseContains("Location: http://0.0.0.0/context/dir/index.html", response);
+
+        assertTrue(index.delete());
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
+        assertResponseContains("Location: http://0.0.0.0/context/dir/index.htm", response);
+        
+        assertTrue(inde.delete());
+        response = connector.getResponses("GET /context/dir/ HTTP/1.0\r\n\r\n");
+        assertResponseContains("403", response);
+    }
+
+    @Test
+    public void testWelcomeDirWithQuestion() throws Exception
+    {
+        testdir.ensureEmpty();
+        File resBase = testdir.getPathFile("docroot").toFile();
+        FS.ensureDirExists(resBase);
+        context.setBaseResource(Resource.newResource(resBase));
+
+        File dir = new File(resBase, "dir?");
+        assertTrue(dir.mkdirs());
+        File index = new File(dir, "index.html");
+        createFile(index, "<h1>Hello Index</h1>");
+
+        ServletHolder defholder = context.addServlet(DefaultServlet.class, "/");
+        defholder.setInitParameter("dirAllowed", "false");
+        defholder.setInitParameter("redirectWelcome", "true");
+        defholder.setInitParameter("welcomeServlets", "false");
+        defholder.setInitParameter("gzip", "false");
+
+        String response = connector.getResponse("GET /context/dir%3F HTTP/1.0\r\n\r\n");
+        assertResponseContains("Location: http://0.0.0.0/context/dir%3F/", response);
+
+        response = connector.getResponse("GET /context/dir%3F/ HTTP/1.0\r\n\r\n");
+        assertResponseContains("Location: http://0.0.0.0/context/dir%3F/index.html", response);
+    }
+
 
     @Test
     public void testWelcomeServlet() throws Exception
@@ -656,7 +737,7 @@ public class DefaultServletTest
 
         response = connector.getResponses("GET /context/nofilesuffix HTTP/1.1\r\n" +
                 "Host: localhost\r\n" +
-                "Connection: close\r\n"+  
+                "Connection: close\r\n"+
                 "\r\n");
         assertResponseContains("200 OK", response);
         assertResponseContains("Accept-Ranges: bytes", response);
@@ -675,7 +756,7 @@ public class DefaultServletTest
 
         response = connector.getResponses("GET /context/nofilesuffix HTTP/1.1\r\n" +
                 "Host: localhost\r\n" +
-                "Connection: close\r\n"+     
+                "Connection: close\r\n"+
                 "Range: bytes=0-9,20-29,40-49\r\n" +
                 "\r\n");
         start = response.indexOf("--jetty");
@@ -692,7 +773,7 @@ public class DefaultServletTest
 
         response = connector.getResponses("GET /context/nofilesuffix HTTP/1.1\r\n" +
                 "Host: localhost\r\n" +
-                "Connection: close\r\n"+    
+                "Connection: close\r\n"+
                 "Range: bytes=0-9,20-29,40-49,60-60,70-79\r\n" +
                 "\r\n");
         start = response.indexOf("--jetty");
@@ -811,7 +892,7 @@ public class DefaultServletTest
         assertResponseNotContains("Vary: Accept-Encoding",response);
         assertResponseNotContains("Content-Encoding: gzip",response);
         assertResponseNotContains("ETag: "+etag_gzip,response);
-        assertResponseContains("ETag: ",response);   
+        assertResponseContains("ETag: ",response);
         
         response = connector.getResponses("GET /context/data0.txt HTTP/1.0\r\nHost:localhost:8080\r\nAccept-Encoding:gzip\r\nIf-None-Match: "+etag_gzip+"\r\n\r\n");
         assertResponseContains("304 Not Modified", response);
@@ -835,7 +916,7 @@ public class DefaultServletTest
     public void testCachedGzip() throws Exception
     {
         testdir.ensureEmpty();
-        File resBase = testdir.getPathFile("docroot").toFile();                
+        File resBase = testdir.getPathFile("docroot").toFile();
         FS.ensureDirExists(resBase);
         File file0 = new File(resBase, "data0.txt");
         createFile(file0, "Hello Text 0");
@@ -898,6 +979,22 @@ public class DefaultServletTest
         response = connector.getResponses("GET /context/data0.txt HTTP/1.0\r\nHost:localhost:8080\r\nAccept-Encoding:gzip\r\nIf-None-Match: W/\"foobar\","+etag+"\r\n\r\n");
         assertResponseContains("304 Not Modified", response);
         assertResponseContains("ETag: "+etag,response);
+    }
+
+    @Test
+    public void testControlCharacter() throws Exception
+    {
+        testdir.ensureEmpty();
+        File docRoot = testdir.getPathFile("docroot").toFile();
+        FS.ensureDirExists(docRoot);
+        ServletHolder defholder = context.addServlet(DefaultServlet.class, "/");
+        defholder.setInitParameter("resourceBase", docRoot.getAbsolutePath());
+
+        String rawResponse = connector.getResponse("GET /context/%0a HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+        HttpTester.Response response = HttpTester.parseResponse(rawResponse);
+        System.out.println(response + "\n" + response.getContent());
+        assertThat("Response.status", response.getStatus(), anyOf(is(HttpServletResponse.SC_NOT_FOUND), is(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)));
+        assertThat("Response.content", response.getContent(), is(not(containsString(docRoot.toString()))));
     }
 
     @Test

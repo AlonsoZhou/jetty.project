@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLSocket;
 
 import org.eclipse.jetty.io.ssl.SslConnection;
@@ -44,6 +45,7 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.eclipse.jetty.util.thread.Scheduler;
 import org.eclipse.jetty.util.thread.TimerScheduler;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -80,6 +82,7 @@ public class SslConnectionTest
             engine.setUseClientMode(false);
             SslConnection sslConnection = new SslConnection(__byteBufferPool, getExecutor(), endpoint, engine);
             sslConnection.setRenegotiationAllowed(__sslCtxFactory.isRenegotiationAllowed());
+            sslConnection.setRenegotiationLimit(__sslCtxFactory.getRenegotiationLimit());
             Connection appConnection = new TestConnection(sslConnection.getDecryptedEndPoint());
             sslConnection.getDecryptedEndPoint().setConnection(appConnection);
             return sslConnection;
@@ -138,6 +141,12 @@ public class SslConnectionTest
         __sslCtxFactory.start();
     }
 
+    @AfterClass
+    public static void stopSsl() throws Exception
+    {
+        __sslCtxFactory.stop();
+    }
+
     @Before
     public void startManager() throws Exception
     {
@@ -149,6 +158,8 @@ public class SslConnectionTest
         _threadPool.start();
         _scheduler.start();
         _manager.start();
+        __sslCtxFactory.setRenegotiationAllowed(true);
+        __sslCtxFactory.setRenegotiationLimit(-1);
 
     }
 
@@ -248,7 +259,7 @@ public class SslConnectionTest
             }
         }
     }
-    protected Socket newClient() throws IOException
+    protected SSLSocket newClient() throws IOException
     {
         SSLSocket socket = __sslCtxFactory.newSslSocket();
         socket.connect(_connector.socket().getLocalSocketAddress());
@@ -258,7 +269,33 @@ public class SslConnectionTest
     @Test
     public void testHelloWorld() throws Exception
     {
-        Socket client = newClient();
+        try (Socket client = newClient())
+        {
+            client.setSoTimeout(60000);
+            try (SocketChannel server = _connector.accept())
+            {
+                server.configureBlocking(false);
+                _manager.accept(server);
+
+                client.getOutputStream().write("Hello".getBytes(StandardCharsets.UTF_8));
+                byte[] buffer = new byte[1024];
+                int len = client.getInputStream().read(buffer);
+                Assert.assertEquals(5, len);
+                Assert.assertEquals("Hello", new String(buffer, 0, len, StandardCharsets.UTF_8));
+
+                _dispatches.set(0);
+                client.getOutputStream().write("World".getBytes(StandardCharsets.UTF_8));
+                len = 5;
+                while(len > 0)
+                    len -= client.getInputStream().read(buffer);
+            }
+        }
+    }
+
+    @Test
+    public void testRenegotiate() throws Exception
+    {
+        SSLSocket client = newClient();
         client.setSoTimeout(60000);
 
         SocketChannel server = _connector.accept();
@@ -271,15 +308,96 @@ public class SslConnectionTest
         Assert.assertEquals(5, len);
         Assert.assertEquals("Hello",new String(buffer,0,len,StandardCharsets.UTF_8));
 
-        _dispatches.set(0);
+        client.startHandshake();
+        
         client.getOutputStream().write("World".getBytes(StandardCharsets.UTF_8));
-        len=5;
-        while(len>0)
-            len-=client.getInputStream().read(buffer);
+        len=client.getInputStream().read(buffer);
+        Assert.assertEquals(5, len);
+        Assert.assertEquals("World",new String(buffer,0,len,StandardCharsets.UTF_8));
 
         client.close();
     }
 
+    @Test
+    public void testRenegotiateNotAllowed() throws Exception
+    {
+        __sslCtxFactory.setRenegotiationAllowed(false);
+        
+        SSLSocket client = newClient();
+        client.setSoTimeout(60000);
+
+        SocketChannel server = _connector.accept();
+        server.configureBlocking(false);
+        _manager.accept(server);
+
+        client.getOutputStream().write("Hello".getBytes(StandardCharsets.UTF_8));
+        byte[] buffer = new byte[1024];
+        int len=client.getInputStream().read(buffer);
+        Assert.assertEquals(5, len);
+        Assert.assertEquals("Hello",new String(buffer,0,len,StandardCharsets.UTF_8));
+
+        client.startHandshake();
+        
+        client.getOutputStream().write("World".getBytes(StandardCharsets.UTF_8));
+        try
+        {
+            client.getInputStream().read(buffer);
+            Assert.fail();
+        }
+        catch(SSLException e)
+        {
+            // expected
+        }
+    }
+
+    @Test
+    public void testRenegotiateLimit() throws Exception
+    {
+        __sslCtxFactory.setRenegotiationAllowed(true);
+        __sslCtxFactory.setRenegotiationLimit(2);
+        
+        SSLSocket client = newClient();
+        client.setSoTimeout(60000);
+
+        SocketChannel server = _connector.accept();
+        server.configureBlocking(false);
+        _manager.accept(server);
+
+        client.getOutputStream().write("Good".getBytes(StandardCharsets.UTF_8));
+        byte[] buffer = new byte[1024];
+        int len=client.getInputStream().read(buffer);
+        Assert.assertEquals(4, len);
+        Assert.assertEquals("Good",new String(buffer,0,len,StandardCharsets.UTF_8));
+        
+        client.startHandshake();
+
+        client.getOutputStream().write("Bye".getBytes(StandardCharsets.UTF_8));
+        len=client.getInputStream().read(buffer);
+        Assert.assertEquals(3, len);
+        Assert.assertEquals("Bye",new String(buffer,0,len,StandardCharsets.UTF_8));
+        
+        client.startHandshake();
+
+        client.getOutputStream().write("Cruel".getBytes(StandardCharsets.UTF_8));
+        len=client.getInputStream().read(buffer);
+        Assert.assertEquals(5, len);
+        Assert.assertEquals("Cruel",new String(buffer,0,len,StandardCharsets.UTF_8));
+
+        client.startHandshake();
+        
+        client.getOutputStream().write("World".getBytes(StandardCharsets.UTF_8));
+        try
+        {
+            client.getInputStream().read(buffer);
+            Assert.fail();
+        }
+        catch(SSLException e)
+        {
+            // expected
+        }
+    }
+    
+    
 
     @Test
     public void testWriteOnConnect() throws Exception

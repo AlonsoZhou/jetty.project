@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,15 +18,11 @@
 
 package org.eclipse.jetty.client;
 
-import java.io.IOException;
-import java.util.Collections;
-
 import org.eclipse.jetty.client.api.Connection;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.annotation.ManagedAttribute;
 import org.eclipse.jetty.util.annotation.ManagedObject;
-import org.eclipse.jetty.util.component.ContainerLifeCycle;
 import org.eclipse.jetty.util.thread.Sweeper;
 
 @ManagedObject
@@ -37,11 +33,6 @@ public abstract class PoolingHttpDestination<C extends Connection> extends HttpD
     public PoolingHttpDestination(HttpClient client, Origin origin)
     {
         super(client, origin);
-        this.connectionPool = newConnectionPool(client);
-        addBean(connectionPool);
-        Sweeper sweeper = client.getBean(Sweeper.class);
-        if (sweeper != null)
-            sweeper.offer(connectionPool);
     }
 
     @Override
@@ -168,12 +159,9 @@ public abstract class PoolingHttpDestination<C extends Connection> extends HttpD
                     if (LOG.isDebugEnabled())
                         LOG.debug("Send failed {} for {}", result, exchange);
                     if (result.retry)
-                    {
-                        if (enqueue(getHttpExchanges(), exchange))
-                            return true;
-                    }
-
-                    request.abort(result.failure);
+                        send(exchange);
+                    else
+                        request.abort(result.failure);
                 }
             }
             return getHttpExchanges().peek() != null;
@@ -222,16 +210,7 @@ public abstract class PoolingHttpDestination<C extends Connection> extends HttpD
 
         if (getHttpExchanges().isEmpty())
         {
-            if (getHttpClient().isRemoveIdleDestinations() && connectionPool.isEmpty())
-            {
-                // There is a race condition between this thread removing the destination
-                // and another thread queueing a request to this same destination.
-                // If this destination is removed, but the request queued, a new connection
-                // will be opened, the exchange will be executed and eventually the connection
-                // will idle timeout and be closed. Meanwhile a new destination will be created
-                // in HttpClient and will be used for other requests.
-                getHttpClient().removeDestination(this);
-            }
+            tryRemoveIdleDestination();
         }
         else
         {
@@ -249,11 +228,25 @@ public abstract class PoolingHttpDestination<C extends Connection> extends HttpD
         connectionPool.close();
     }
 
-    @Override
-    public void dump(Appendable out, String indent) throws IOException
+    public void abort(Throwable cause)
     {
-        super.dump(out, indent);
-        ContainerLifeCycle.dump(out, indent, Collections.singletonList(connectionPool));
+        super.abort(cause);
+        if (getHttpExchanges().isEmpty())
+            tryRemoveIdleDestination();
+    }
+
+    private void tryRemoveIdleDestination()
+    {
+        if (getHttpClient().isRemoveIdleDestinations() && connectionPool.isEmpty())
+        {
+            // There is a race condition between this thread removing the destination
+            // and another thread queueing a request to this same destination.
+            // If this destination is removed, but the request queued, a new connection
+            // will be opened, the exchange will be executed and eventually the connection
+            // will idle timeout and be closed. Meanwhile a new destination will be created
+            // in HttpClient and will be used for other requests.
+            getHttpClient().removeDestination(this);
+        }
     }
 
     @Override

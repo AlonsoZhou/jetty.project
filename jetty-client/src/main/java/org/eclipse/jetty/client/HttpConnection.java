@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -68,21 +68,23 @@ public abstract class HttpConnection implements Connection
     @Override
     public void send(Request request, Response.CompleteListener listener)
     {
-        ArrayList<Response.ResponseListener> listeners = new ArrayList<>(2);
-        if (request.getTimeout() > 0)
+        HttpRequest httpRequest = (HttpRequest)request;
+
+        ArrayList<Response.ResponseListener> listeners = new ArrayList<>(httpRequest.getResponseListeners());
+        if (httpRequest.getTimeout() > 0)
         {
-            TimeoutCompleteListener timeoutListener = new TimeoutCompleteListener(request);
+            TimeoutCompleteListener timeoutListener = new TimeoutCompleteListener(httpRequest);
             timeoutListener.schedule(getHttpClient().getScheduler());
             listeners.add(timeoutListener);
         }
         if (listener != null)
             listeners.add(listener);
 
-        HttpExchange exchange = new HttpExchange(getHttpDestination(), (HttpRequest)request, listeners);
+        HttpExchange exchange = new HttpExchange(getHttpDestination(), httpRequest, listeners);
 
         SendFailure result = send(exchange);
         if (result != null)
-            request.abort(result.failure);
+            httpRequest.abort(result.failure);
     }
 
     protected abstract SendFailure send(HttpExchange exchange);
@@ -111,7 +113,7 @@ public abstract class HttpConnection implements Connection
         }
 
         // If we are HTTP 1.1, add the Host header
-        if (version.getVersion() == 11)
+        if (version.getVersion() <= 11)
         {
             if (!headers.containsKey(HttpHeader.HOST.asString()))
                 headers.put(getHttpDestination().getHostField());
@@ -120,25 +122,21 @@ public abstract class HttpConnection implements Connection
         // Add content headers
         if (content != null)
         {
-            if (content instanceof ContentProvider.Typed)
+            if (!headers.containsKey(HttpHeader.CONTENT_TYPE.asString()))
             {
-                if (!headers.containsKey(HttpHeader.CONTENT_TYPE.asString()))
-                {
-                    String contentType = ((ContentProvider.Typed)content).getContentType();
-                    if (contentType != null)
-                        headers.put(HttpHeader.CONTENT_TYPE, contentType);
-                }
+                String contentType = null;
+                if (content instanceof ContentProvider.Typed)
+                    contentType = ((ContentProvider.Typed)content).getContentType();
+                if (contentType != null)
+                    headers.put(HttpHeader.CONTENT_TYPE, contentType);
+                else
+                    headers.put(HttpHeader.CONTENT_TYPE, "application/octet-stream");
             }
             long contentLength = content.getLength();
             if (contentLength >= 0)
             {
                 if (!headers.containsKey(HttpHeader.CONTENT_LENGTH.asString()))
                     headers.put(HttpHeader.CONTENT_LENGTH, String.valueOf(contentLength));
-            }
-            else
-            {
-                if (!headers.containsKey(HttpHeader.TRANSFER_ENCODING.asString()))
-                    headers.put(CHUNKED_FIELD);
             }
         }
 

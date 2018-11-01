@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.List;
 import javax.inject.Inject;
 
+import org.eclipse.jetty.util.StringUtil;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -90,10 +91,14 @@ public class TestJettyOSGiBootCore
     public static List<Option> coreJettyDependencies()
     {
         List<Option> res = new ArrayList<Option>();
+        
+        String mavenRepoPath = System.getProperty( "mavenRepoPath" );
+        if (!StringUtil.isBlank( mavenRepoPath))
+            res.add( systemProperty( "org.ops4j.pax.url.mvn.localRepository" ).value( mavenRepoPath ) );
 
-        res.add(mavenBundle().groupId( "org.ow2.asm" ).artifactId( "asm" ).versionAsInProject().start());
-        res.add(mavenBundle().groupId( "org.ow2.asm" ).artifactId( "asm-commons" ).versionAsInProject().start());
-        res.add(mavenBundle().groupId( "org.ow2.asm" ).artifactId( "asm-tree" ).versionAsInProject().start());
+        res.add(mavenBundle().groupId( "org.ow2.asm" ).artifactId( "asm" ).version("5.0.1").start());
+        res.add(mavenBundle().groupId( "org.ow2.asm" ).artifactId( "asm-commons" ).version("5.0.1").start());
+        res.add(mavenBundle().groupId( "org.ow2.asm" ).artifactId( "asm-tree" ).version("5.0.1").start());
         res.add(mavenBundle().groupId( "org.apache.aries" ).artifactId( "org.apache.aries.util" ).versionAsInProject().start());
         res.add(mavenBundle().groupId( "org.apache.aries.spifly" ).artifactId( "org.apache.aries.spifly.dynamic.bundle" ).versionAsInProject().start());
 

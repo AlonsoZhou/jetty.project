@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -92,6 +92,21 @@ public class HttpChannelState
         ERRORED           // The error has been processed
     }
 
+    public enum Interest
+    {
+        NONE(false),
+        NEEDED(true),
+        REGISTERED(true);
+        
+        final boolean _interested;
+        boolean isInterested() { return _interested;}
+        
+        Interest(boolean interest)
+        {
+            _interested = interest;
+        }
+    }
+    
     private final boolean DEBUG=LOG.isDebugEnabled();
     private final Locker _locker=new Locker();
     private final HttpChannel _channel;
@@ -101,8 +116,8 @@ public class HttpChannelState
     private Async _async;
     private boolean _initial;
     private boolean _asyncReadPossible;
-    private boolean _asyncReadUnready;
-    private boolean _asyncWrite; // TODO refactor same as read
+    private Interest _asyncRead=Interest.NONE;
+    private boolean _asyncWritePossible;
     private long _timeoutMs=DEFAULT_TIMEOUT;
     private AsyncContextEvent _event;
 
@@ -161,9 +176,15 @@ public class HttpChannelState
     {
         try(Locker.Lock lock= _locker.lock())
         {
-            return String.format("%s@%x{s=%s a=%s i=%b r=%s w=%b}",getClass().getSimpleName(),hashCode(),_state,_async,_initial,
-                    _asyncReadPossible?(_asyncReadUnready?"PU":"P!U"):(_asyncReadUnready?"!PU":"!P!U"),
-                    _asyncWrite);
+            return String.format("%s@%x{s=%s a=%s i=%b r=%s/%s w=%b}",
+                getClass().getSimpleName(),
+                hashCode(),
+                _state,
+                _async,
+                _initial,
+                _asyncRead,
+                _asyncReadPossible,
+                _asyncWritePossible);
         }
     }
 
@@ -201,17 +222,17 @@ public class HttpChannelState
                     return Action.TERMINATED;
 
                 case ASYNC_WOKEN:
-                    if (_asyncReadPossible)
+                    if (_asyncRead.isInterested() && _asyncReadPossible)
                     {
                         _state=State.ASYNC_IO;
-                        _asyncReadUnready=false;
+                        _asyncRead=Interest.NONE;
                         return Action.READ_CALLBACK;
                     }
 
-                    if (_asyncWrite)
+                    if (_asyncWritePossible)
                     {
                         _state=State.ASYNC_IO;
-                        _asyncWrite=false;
+                        _asyncWritePossible=false;
                         return Action.WRITE_CALLBACK;
                     }
 
@@ -282,7 +303,7 @@ public class HttpChannelState
                         {
                             listener.onStartAsync(event);
                         }
-                        catch(Exception e)
+                        catch(Throwable e)
                         {
                             // TODO Async Dispatch Error
                             LOG.warn(e);
@@ -398,29 +419,32 @@ public class HttpChannelState
                 case EXPIRED:
                     _state=State.DISPATCHED;
                     _async=Async.NOT_ASYNC;
-                    action = Action.ERROR_DISPATCH;
+                    action=Action.ERROR_DISPATCH;
                     break;
 
                 case STARTED:
-                    if (_asyncReadUnready && _asyncReadPossible)
+                    if (_asyncRead.isInterested() && _asyncReadPossible)
                     {
                         _state=State.ASYNC_IO;
-                        _asyncReadUnready=false;
-                        action = Action.READ_CALLBACK;
+                        _asyncRead=Interest.NONE;
+                        action=Action.READ_CALLBACK;
                     }
-                    else if (_asyncWrite) // TODO refactor same as read
+                    else if (_asyncWritePossible)
                     {
-                        _asyncWrite=false;
                         _state=State.ASYNC_IO;
+                        _asyncWritePossible=false;
                         action=Action.WRITE_CALLBACK;
                     }
                     else
                     {
                         _state=State.ASYNC_WAIT;
                         action=Action.WAIT; 
-                        if (_asyncReadUnready)
-                            _channel.asyncReadFillInterested();
-                        Scheduler scheduler = _channel.getScheduler();
+                        if (_asyncRead==Interest.NEEDED)
+                        {
+                            _asyncRead=Interest.REGISTERED;
+                            read_interested=true;
+                        }
+                        Scheduler scheduler=_channel.getScheduler();
                         if (scheduler!=null && _timeoutMs>0)
                             _event.setTimeoutTask(scheduler.schedule(_event,_timeoutMs,TimeUnit.MILLISECONDS));
                     }
@@ -453,6 +477,9 @@ public class HttpChannelState
                     break;
             }
         }
+
+        if (read_interested)
+            _channel.onAsyncWaitForContent();
 
         return action;
     }
@@ -537,7 +564,7 @@ public class HttpChannelState
                         {
                             listener.onTimeout(event);
                         }
-                        catch(Exception e)
+                        catch(Throwable e)
                         {
                             LOG.debug(e);
                             event.addThrowable(e);
@@ -668,7 +695,7 @@ public class HttpChannelState
                 {
                     listener.onError(event);
                 }
-                catch(Exception x)
+                catch(Throwable x)
                 {
                     LOG.info("Exception while invoking listener " + listener, x);
                 }
@@ -713,7 +740,7 @@ public class HttpChannelState
                             {
                                 listener.onComplete(event);
                             }
-                            catch(Exception e)
+                            catch(Throwable e)
                             {
                                 LOG.warn(e);
                             }
@@ -751,8 +778,9 @@ public class HttpChannelState
             _state=State.IDLE;
             _async=Async.NOT_ASYNC;
             _initial=true;
-            _asyncReadPossible=_asyncReadUnready=false;
-            _asyncWrite=false;
+            _asyncReadPossible=false;
+            _asyncRead=Interest.NONE;
+            _asyncWritePossible=false;
             _timeoutMs=DEFAULT_TIMEOUT;
             _event=null;
         }
@@ -775,8 +803,9 @@ public class HttpChannelState
             _state=State.UPGRADED;
             _async=Async.NOT_ASYNC;
             _initial=true;
-            _asyncReadPossible=_asyncReadUnready=false;
-            _asyncWrite=false;
+            _asyncReadPossible=false;
+            _asyncRead=Interest.NONE;
+            _asyncWritePossible=false;
             _timeoutMs=DEFAULT_TIMEOUT;
             _event=null;
         }
@@ -945,8 +974,8 @@ public class HttpChannelState
     /* ------------------------------------------------------------ */
     /** Called to signal async read isReady() has returned false.
      * This indicates that there is no content available to be consumed
-     * and that once the channel enteres the ASYNC_WAIT state it will
-     * register for read interest by calling {@link HttpChannel#asyncReadFillInterested()}
+     * and that once the channel enters the ASYNC_WAIT state it will
+     * register for read interest by calling {@link HttpChannel#onAsyncWaitForContent()}
      * either from this method or from a subsequent call to {@link #unhandle()}.
      */
     public void onReadUnready()
@@ -955,17 +984,21 @@ public class HttpChannelState
         try(Locker.Lock lock= _locker.lock())
         {
             // We were already unready, this is not a state change, so do nothing
-            if (!_asyncReadUnready)
+            if (_asyncRead!=Interest.REGISTERED)
             {
-                _asyncReadUnready=true;
                 _asyncReadPossible=false; // Assumes this has been checked in isReady() with lock held
                 if (_state==State.ASYNC_WAIT)
+                {
                     interested=true;
+                    _asyncRead=Interest.REGISTERED;
+                }
+                else
+                    _asyncRead=Interest.NEEDED;
             }
         }
 
         if (interested)
-            _channel.asyncReadFillInterested();
+            _channel.onAsyncWaitForContent();
     }
 
     /* ------------------------------------------------------------ */
@@ -981,7 +1014,7 @@ public class HttpChannelState
         try(Locker.Lock lock= _locker.lock())
         {
             _asyncReadPossible=true;
-            if (_state==State.ASYNC_WAIT && _asyncReadUnready)
+            if (_state==State.ASYNC_WAIT && _asyncRead.isInterested())
             {
                 woken=true;
                 _state=State.ASYNC_WOKEN;
@@ -1002,7 +1035,7 @@ public class HttpChannelState
         boolean woken=false;
         try(Locker.Lock lock= _locker.lock())
         {
-            _asyncReadUnready=true;
+            _asyncRead=Interest.REGISTERED;
             _asyncReadPossible=true;
             if (_state==State.ASYNC_WAIT)
             {
@@ -1027,7 +1060,7 @@ public class HttpChannelState
 
         try(Locker.Lock lock= _locker.lock())
         {
-            _asyncWrite=true;
+            _asyncWritePossible=true;
             if (_state==State.ASYNC_WAIT)
             {
                 _state=State.ASYNC_WOKEN;

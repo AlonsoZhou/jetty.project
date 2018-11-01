@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -34,11 +34,7 @@ import org.eclipse.jetty.util.log.Logger;
 public class BlockingCallback implements Callback.NonBlocking
 {
     private static final Logger LOG = Log.getLogger(BlockingCallback.class);
-    private static Throwable SUCCEEDED = new Throwable()
-    {
-        @Override
-        public String toString() { return "SUCCEEDED"; }
-    };
+    private static Throwable SUCCEEDED = new ConstantThrowable("SUCCEEDED");
     
     private final CountDownLatch _latch = new CountDownLatch(1);
     private final AtomicReference<Throwable> _state = new AtomicReference<>();

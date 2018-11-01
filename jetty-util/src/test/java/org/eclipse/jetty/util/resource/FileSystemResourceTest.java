@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -29,6 +29,7 @@ import static org.junit.Assert.assertThat;
 import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeNoException;
 import static org.junit.Assume.assumeThat;
+import static org.junit.Assume.assumeTrue;
 
 import java.io.BufferedWriter;
 import java.io.File;
@@ -335,7 +336,7 @@ public class FileSystemResourceTest
     public void testLastModified() throws Exception
     {
         Path dir = testdir.getPath().normalize().toRealPath();
-        File file = testdir.getFile("foo");
+        File file = testdir.getPathFile("foo").toFile();
         file.createNewFile();
 
         long expected = file.lastModified();
@@ -1397,5 +1398,19 @@ public class FileSystemResourceTest
         }
     }
     
-    
+    @Test
+    public void testUncPath() throws Exception
+    {
+        assumeTrue("Only windows supports UNC paths", OS.IS_WINDOWS);
+        assumeFalse("FileResource does not support this test", _class.equals(FileResource.class));
+        
+        try (Resource base = newResource(URI.create("file://127.0.0.1/path")))
+        {
+            Resource resource = base.addPath("WEB-INF/");
+            assertThat("getURI()", resource.getURI().toASCIIString(), containsString("path/WEB-INF/"));
+            assertThat("isAlias()", resource.isAlias(), is(true));
+            assertThat("getAlias()", resource.getAlias(), notNullValue());
+            assertThat("getAlias()", resource.getAlias().toASCIIString(), containsString("path/WEB-INF"));
+        }
+    }
 }

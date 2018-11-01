@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -36,48 +36,54 @@ public interface WebSocketContainerScope
      * 
      * @return the buffer pool (never null)
      */
-    public ByteBufferPool getBufferPool();
+    ByteBufferPool getBufferPool();
 
     /**
      * Executor in use by the container.
      * 
      * @return the Executor in use by the container.
      */
-    public Executor getExecutor();
+    Executor getExecutor();
 
     /**
      * Object Factory used to create objects.
      * 
      * @return Object Factory used to create instances of objects.
      */
-    public DecoratedObjectFactory getObjectFactory();
+    DecoratedObjectFactory getObjectFactory();
 
     /**
      * The policy the container is running on.
      * 
      * @return the websocket policy
      */
-    public WebSocketPolicy getPolicy();
+    WebSocketPolicy getPolicy();
 
     /**
      * The SslContextFactory in use by the container.
      * 
      * @return the SslContextFactory in use by the container (can be null if no SSL context is defined)
      */
-    public SslContextFactory getSslContextFactory();
-
+    SslContextFactory getSslContextFactory();
+    
+    /**
+     * Test for if the container has been started.
+     *
+     * @return true if container is started and running
+     */
+    boolean isRunning();
+    
     /**
      * A Session has been opened
      * 
      * @param session the session that was opened
      */
-    public void onSessionOpened(WebSocketSession session);
+    void onSessionOpened(WebSocketSession session);
     
     /**
      * A Session has been closed
      * 
      * @param session the session that was closed
      */
-    public void onSessionClosed(WebSocketSession session);
-
+    void onSessionClosed(WebSocketSession session);
 }

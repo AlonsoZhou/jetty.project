@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -20,6 +20,7 @@ package org.eclipse.jetty.http2.server;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.function.Consumer;
 
 import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpField;
@@ -40,6 +41,7 @@ import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpChannel;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpInput;
+import org.eclipse.jetty.server.handler.ContextHandler;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.log.Log;
@@ -53,7 +55,6 @@ public class HttpChannelOverHTTP2 extends HttpChannel
 
     private boolean _expect100Continue;
     private boolean _delayedUntilContent;
-    private boolean _handled;
 
     public HttpChannelOverHTTP2(Connector connector, HttpConfiguration configuration, EndPoint endPoint, HttpTransportOverHTTP2 transport)
     {
@@ -69,6 +70,18 @@ public class HttpChannelOverHTTP2 extends HttpChannel
     public boolean isExpecting100Continue()
     {
         return _expect100Continue;
+    }
+
+    @Override
+    public void setIdleTimeout(long timeoutMs)
+    {
+        getStream().setIdleTimeout(timeoutMs);
+    }
+
+    @Override
+    public long getIdleTimeout()
+    {
+        return getStream().getIdleTimeout();
     }
 
     public Runnable onRequest(HeadersFrame frame)
@@ -102,11 +115,13 @@ public class HttpChannelOverHTTP2 extends HttpChannel
 
             boolean endStream = frame.isEndStream();
             if (endStream)
+            {
+                onContentComplete();
                 onRequestComplete();
+            }
 
             _delayedUntilContent = getHttpConfiguration().isDelayDispatchUntilContent() &&
                     !endStream && !_expect100Continue;
-            _handled = !_delayedUntilContent;
 
             if (LOG.isDebugEnabled())
             {
@@ -114,7 +129,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel
                 LOG.debug("HTTP2 Request #{}/{}, delayed={}:{}{} {} {}{}{}",
                         stream.getId(), Integer.toHexString(stream.getSession().hashCode()),
                         _delayedUntilContent, System.lineSeparator(),
-                        request.getMethod(), request.getURI(), request.getVersion(),
+                        request.getMethod(), request.getURI(), request.getHttpVersion(),
                         System.lineSeparator(), fields);
             }
 
@@ -138,6 +153,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel
         {
             onRequest(request);
             getRequest().setAttribute("org.eclipse.jetty.pushed", Boolean.TRUE);
+            onContentComplete();
             onRequestComplete();
 
             if (LOG.isDebugEnabled())
@@ -145,7 +161,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel
                 Stream stream = getStream();
                 LOG.debug("HTTP2 PUSH Request #{}/{}:{}{} {} {}{}{}",
                         stream.getId(), Integer.toHexString(stream.getSession().hashCode()), System.lineSeparator(),
-                        request.getMethod(), request.getURI(), request.getVersion(),
+                        request.getMethod(), request.getURI(), request.getHttpVersion(),
                         System.lineSeparator(), request.getFields());
             }
 
@@ -174,7 +190,6 @@ public class HttpChannelOverHTTP2 extends HttpChannel
     {
         _expect100Continue = false;
         _delayedUntilContent = false;
-        _handled = false;
         super.recycle();
         getHttpTransport().recycle();
     }
@@ -187,7 +202,7 @@ public class HttpChannelOverHTTP2 extends HttpChannel
         {
             Stream stream = getStream();
             LOG.debug("HTTP2 Commit Response #{}/{}:{}{} {} {}{}{}",
-                    stream.getId(), Integer.toHexString(stream.getSession().hashCode()), System.lineSeparator(), info.getVersion(), info.getStatus(), info.getReason(),
+                    stream.getId(), Integer.toHexString(stream.getSession().hashCode()), System.lineSeparator(), info.getHttpVersion(), info.getStatus(), info.getReason(),
                     System.lineSeparator(), info.getFields());
         }
     }
@@ -243,7 +258,11 @@ public class HttpChannelOverHTTP2 extends HttpChannel
 
         boolean endStream = frame.isEndStream();
         if (endStream)
-            handle |= onRequestComplete();
+        {
+            boolean handle_content = onContentComplete();
+            boolean handle_request = onRequestComplete();
+            handle |= handle_content | handle_request;
+        }
 
         if (LOG.isDebugEnabled())
         {
@@ -255,27 +274,52 @@ public class HttpChannelOverHTTP2 extends HttpChannel
                     handle);
         }
 
-        boolean delayed = _delayedUntilContent;
+        boolean wasDelayed = _delayedUntilContent;
         _delayedUntilContent = false;
-        if (delayed)
-            _handled = true;
-        return handle || delayed ? this : null;
+        return handle || wasDelayed ? this : null;
     }
 
-    public boolean isRequestHandled()
+    public boolean isRequestIdle()
     {
-        return _handled;
+        return getState().isIdle();
     }
 
-    public void onFailure(Throwable failure)
+    public boolean onStreamTimeout(Throwable failure, Consumer<Runnable> consumer)
     {
-        onEarlyEOF();
-        getState().asyncError(failure);
+        boolean result = false;
+        if (isRequestIdle())
+        {
+            consumeInput();
+            result = true;
+        }
+
+        getHttpTransport().onStreamTimeout(failure);
+        if (getRequest().getHttpInput().onIdleTimeout(failure))
+            consumer.accept(this::handleWithContext);
+
+        return result;
+    }
+
+    public Runnable onFailure(Throwable failure, Callback callback)
+    {
+        getHttpTransport().onStreamFailure(failure);
+        boolean handle = getRequest().getHttpInput().failed(failure);
+        consumeInput();
+        return new FailureTask(failure, callback, handle);
     }
 
     protected void consumeInput()
     {
         getRequest().getHttpInput().consumeAll();
+    }
+
+    private void handleWithContext()
+    {
+        ContextHandler context = getState().getContextHandler();
+        if (context != null)
+            context.handle(getRequest(), this);
+        else
+            handle();
     }
 
     /**
@@ -315,5 +359,36 @@ public class HttpChannelOverHTTP2 extends HttpChannel
         if (stream != null)
             streamId = stream.getId();
         return String.format("%s#%d", super.toString(), getStream() == null ? -1 : streamId);
+    }
+
+    private class FailureTask implements Runnable
+    {
+        private final Throwable failure;
+        private final Callback callback;
+        private final boolean handle;
+
+        public FailureTask(Throwable failure, Callback callback, boolean handle)
+        {
+            this.failure = failure;
+            this.callback = callback;
+            this.handle = handle;
+        }
+
+        @Override
+        public void run()
+        {
+            try
+            {
+                if (handle)
+                    handleWithContext();
+                else
+                    getState().asyncError(failure);
+                callback.succeeded();
+            }
+            catch (Throwable x)
+            {
+                callback.failed(x);
+            }
+        }
     }
 }

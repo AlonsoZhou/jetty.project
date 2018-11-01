@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -50,6 +50,7 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpHeaderValue;
 import org.eclipse.jetty.http.PathMap;
@@ -109,6 +110,7 @@ public class ServletHandler extends ScopedHandler
     private boolean _startWithUnavailable=false;
     private boolean _ensureDefaultServlet=true;
     private IdentityService _identityService;
+    private boolean _allowDuplicateMappings=false;
 
     private ServletHolder[] _servlets=new ServletHolder[0];
     private ServletMapping[] _servletMappings;
@@ -646,8 +648,15 @@ public class ServletHandler extends ScopedHandler
                     else
                         response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
                 }
+                else if (th instanceof BadMessageException)
+                {
+                    BadMessageException bme = (BadMessageException)th;
+                    response.sendError(bme.getCode(),bme.getMessage());
+                }
                 else
+                {
                     response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                }
             }
             else
             {
@@ -825,6 +834,22 @@ public class ServletHandler extends ScopedHandler
         _startWithUnavailable=start;
     }
 
+    /**
+     * @return the allowDuplicateMappings
+     */
+    public boolean isAllowDuplicateMappings()
+    {
+        return _allowDuplicateMappings;
+    }
+
+    /**
+     * @param allowDuplicateMappings the allowDuplicateMappings to set
+     */
+    public void setAllowDuplicateMappings(boolean allowDuplicateMappings)
+    {
+        _allowDuplicateMappings = allowDuplicateMappings;
+    }
+
     /* ------------------------------------------------------------ */
     /**
      * @return True if this handler will start with unavailable servlets
@@ -998,7 +1023,11 @@ public class ServletHandler extends ScopedHandler
 
         try
         {
-            setServlets(ArrayUtil.addToArray(holders, servlet, ServletHolder.class));
+            synchronized (this)
+            {
+                if (servlet != null && !containsServletHolder(servlet))
+                    setServlets(ArrayUtil.addToArray(holders, servlet, ServletHolder.class));
+            }
 
             ServletMapping mapping = new ServletMapping();
             mapping.setServletName(servlet.getName());
@@ -1022,7 +1051,14 @@ public class ServletHandler extends ScopedHandler
      */
     public void addServlet(ServletHolder holder)
     {
-        setServlets(ArrayUtil.addToArray(getServlets(), holder, ServletHolder.class));
+        if (holder == null)
+            return;
+        
+        synchronized (this)
+        {
+            if (!containsServletHolder(holder))
+                setServlets(ArrayUtil.addToArray(getServlets(), holder, ServletHolder.class));
+        }
     }
 
     /* ------------------------------------------------------------ */
@@ -1104,7 +1140,11 @@ public class ServletHandler extends ScopedHandler
 
         try
         {
-            setFilters(ArrayUtil.addToArray(holders, holder, FilterHolder.class));
+            synchronized (this)
+            {
+                if (holder != null && !containsFilterHolder(holder))
+                    setFilters(ArrayUtil.addToArray(holders, holder, FilterHolder.class));
+            }
 
             FilterMapping mapping = new FilterMapping();
             mapping.setFilterName(holder.getName());
@@ -1172,7 +1212,11 @@ public class ServletHandler extends ScopedHandler
 
         try
         {
-            setFilters(ArrayUtil.addToArray(holders, holder, FilterHolder.class));
+            synchronized (this)
+            {
+                if (holder != null && !containsFilterHolder(holder))
+                    setFilters(ArrayUtil.addToArray(holders, holder, FilterHolder.class));
+            }
 
             FilterMapping mapping = new FilterMapping();
             mapping.setFilterName(holder.getName());
@@ -1217,7 +1261,13 @@ public class ServletHandler extends ScopedHandler
     public void addFilter (FilterHolder filter, FilterMapping filterMapping)
     {
         if (filter != null)
-            setFilters(ArrayUtil.addToArray(getFilters(), filter, FilterHolder.class));
+        {
+            synchronized (this)
+            {
+                if (!containsFilterHolder(filter))
+                    setFilters(ArrayUtil.addToArray(getFilters(), filter, FilterHolder.class));
+            }
+        }
         if (filterMapping != null)
             addFilterMapping(filterMapping);
     }
@@ -1229,8 +1279,14 @@ public class ServletHandler extends ScopedHandler
      */
     public void addFilter (FilterHolder filter)
     {
-        if (filter != null)
-            setFilters(ArrayUtil.addToArray(getFilters(), filter, FilterHolder.class));
+        if (filter == null)
+            return;
+
+        synchronized (this)
+        {
+            if (!containsFilterHolder(filter))
+                setFilters(ArrayUtil.addToArray(getFilters(), filter, FilterHolder.class));
+        }
     }
 
     /* ------------------------------------------------------------ */
@@ -1452,7 +1508,7 @@ public class ServletHandler extends ScopedHandler
             Map<String,ServletMapping> servletPathMappings = new HashMap<String,ServletMapping>();
             
             //create a map of paths to set of ServletMappings that define that mapping
-            HashMap<String, Set<ServletMapping>> sms = new HashMap<String, Set<ServletMapping>>();
+            HashMap<String, List<ServletMapping>> sms = new HashMap<String, List<ServletMapping>>();
             for (ServletMapping servletMapping : _servletMappings)
             {
                 String[] pathSpecs = servletMapping.getPathSpecs();
@@ -1460,10 +1516,10 @@ public class ServletHandler extends ScopedHandler
                 {
                     for (String pathSpec : pathSpecs)
                     {
-                        Set<ServletMapping> mappings = sms.get(pathSpec);
+                        List<ServletMapping> mappings = sms.get(pathSpec);
                         if (mappings == null)
                         {
-                            mappings = new HashSet<ServletMapping>();
+                            mappings = new ArrayList<ServletMapping>();
                             sms.put(pathSpec, mappings);
                         }
                         mappings.add(servletMapping);
@@ -1476,7 +1532,7 @@ public class ServletHandler extends ScopedHandler
             {
                 //for each path, look at the mappings where it is referenced
                 //if a mapping is for a servlet that is not enabled, skip it
-                Set<ServletMapping> mappings = sms.get(pathSpec);
+                List<ServletMapping> mappings = sms.get(pathSpec);
 
                 ServletMapping finalMapping = null;
                 for (ServletMapping mapping : mappings)
@@ -1494,9 +1550,15 @@ public class ServletHandler extends ScopedHandler
                         finalMapping = mapping;
                     else
                     {
-                        //already have a candidate - only accept another one if the candidate is a default
+                        //already have a candidate - only accept another one 
+                        //if the candidate is a default, or we're allowing duplicate mappings
                         if (finalMapping.isDefault())
                             finalMapping = mapping;
+                        else if (isAllowDuplicateMappings())
+                        {
+                            LOG.warn("Multiple servlets map to path {}: {} and {}, choosing {}", pathSpec, finalMapping.getServletName(), mapping.getServletName(), mapping);
+                            finalMapping = mapping;
+                        }
                         else
                         {
                             //existing candidate isn't a default, if the one we're looking at isn't a default either, then its an error
@@ -1555,7 +1617,36 @@ public class ServletHandler extends ScopedHandler
         if (getHandler()!=null)
             nextHandle(URIUtil.addPaths(request.getServletPath(),request.getPathInfo()),baseRequest,request,response);
     }
+    
+    
+    protected synchronized boolean containsFilterHolder (FilterHolder holder)
+    {
+        if (_filters == null)
+            return false;
+        boolean found = false;
+        for (FilterHolder f:_filters)
+        {
+            if (f == holder)
+                found = true;
+        }
+        return found;
+    }
 
+    
+    protected synchronized boolean containsServletHolder (ServletHolder holder)
+    {
+        if (_servlets == null)
+            return false;
+        boolean found = false;
+        for (ServletHolder s:_servlets)
+        {
+            if (s == holder)
+                found = true;
+        }
+        return found;
+    }
+    
+    
     /* ------------------------------------------------------------ */
     /**
      * @param filterChainsCached The filterChainsCached to set.

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -25,6 +25,7 @@ import java.util.List;
 
 import org.eclipse.jetty.http.HttpParser.State;
 import org.eclipse.jetty.util.BufferUtil;
+import org.eclipse.jetty.util.log.StacklessLogging;
 import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Before;
@@ -209,6 +210,32 @@ public class HttpParserTest
         Assert.assertEquals(-1, _headers);
     }
 
+    @Test
+    public void testAllowedLinePreamble() throws Exception
+    {
+        ByteBuffer buffer= BufferUtil.toBuffer("\r\n\r\nGET / HTTP/1.0\r\n");
+
+        HttpParser.RequestHandler handler  = new Handler();
+        HttpParser parser= new HttpParser(handler);
+        parseAll(parser,buffer);
+        Assert.assertEquals("GET", _methodOrVersion);
+        Assert.assertEquals("/", _uriOrStatus);
+        Assert.assertEquals("HTTP/1.0", _versionOrReason);
+        Assert.assertEquals(-1, _headers);
+    }
+    
+    @Test
+    public void testDisallowedLinePreamble() throws Exception
+    {
+        ByteBuffer buffer= BufferUtil.toBuffer("\r\n \r\nGET / HTTP/1.0\r\n");
+
+        HttpParser.RequestHandler handler  = new Handler();
+        HttpParser parser= new HttpParser(handler);
+        parseAll(parser,buffer);
+        Assert.assertEquals("Bad preamble", _bad);
+    }
+    
+    
     @Test
     public void testConnect() throws Exception
     {
@@ -765,6 +792,101 @@ public class HttpParserTest
         HttpParser.RequestHandler handler = new Handler();
         HttpParser parser = new HttpParser(handler);
         parseAll(parser, buffer);
+
+        Assert.assertEquals("GET", _methodOrVersion);
+        Assert.assertEquals("/chunk", _uriOrStatus);
+        Assert.assertEquals("HTTP/1.0", _versionOrReason);
+        Assert.assertEquals(1, _headers);
+        Assert.assertEquals("Header1", _hdr[0]);
+        Assert.assertEquals("value1", _val[0]);
+        Assert.assertEquals("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", _content);
+
+        Assert.assertTrue(_headerCompleted);
+        Assert.assertTrue(_messageCompleted);
+    }
+
+    @Test
+    public void testChunkParseTrailer() throws Exception
+    {
+        ByteBuffer buffer = BufferUtil.toBuffer(
+                "GET /chunk HTTP/1.0\r\n"
+                        + "Header1: value1\r\n"
+                        + "Transfer-Encoding: chunked\r\n"
+                        + "\r\n"
+                        + "a;\r\n"
+                        + "0123456789\r\n"
+                        + "1a\r\n"
+                        + "ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n"
+                        + "0\r\n"
+                        + "Trailer: value\r\n"
+                        + "\r\n");
+        HttpParser.RequestHandler handler = new Handler();
+        HttpParser parser = new HttpParser(handler);
+        parseAll(parser, buffer);
+
+        Assert.assertEquals("GET", _methodOrVersion);
+        Assert.assertEquals("/chunk", _uriOrStatus);
+        Assert.assertEquals("HTTP/1.0", _versionOrReason);
+        Assert.assertEquals(1, _headers);
+        Assert.assertEquals("Header1", _hdr[0]);
+        Assert.assertEquals("value1", _val[0]);
+        Assert.assertEquals("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", _content);
+
+        Assert.assertTrue(_headerCompleted);
+        Assert.assertTrue(_messageCompleted);
+    }
+
+    @Test
+    public void testChunkParseBadTrailer() throws Exception
+    {
+        ByteBuffer buffer = BufferUtil.toBuffer(
+                "GET /chunk HTTP/1.0\r\n"
+                        + "Header1: value1\r\n"
+                        + "Transfer-Encoding: chunked\r\n"
+                        + "\r\n"
+                        + "a;\r\n"
+                        + "0123456789\r\n"
+                        + "1a\r\n"
+                        + "ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n"
+                        + "0\r\n"
+                        + "Trailer: value");
+        HttpParser.RequestHandler handler = new Handler();
+        HttpParser parser = new HttpParser(handler);
+        parseAll(parser, buffer);
+        parser.atEOF();
+        parser.parseNext(BufferUtil.EMPTY_BUFFER);
+
+        Assert.assertEquals("GET", _methodOrVersion);
+        Assert.assertEquals("/chunk", _uriOrStatus);
+        Assert.assertEquals("HTTP/1.0", _versionOrReason);
+        Assert.assertEquals(1, _headers);
+        Assert.assertEquals("Header1", _hdr[0]);
+        Assert.assertEquals("value1", _val[0]);
+        Assert.assertEquals("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", _content);
+
+        Assert.assertTrue(_headerCompleted);
+        Assert.assertTrue(_early);
+    }
+
+
+    @Test
+    public void testChunkParseNoTrailer() throws Exception
+    {
+        ByteBuffer buffer = BufferUtil.toBuffer(
+                "GET /chunk HTTP/1.0\r\n"
+                        + "Header1: value1\r\n"
+                        + "Transfer-Encoding: chunked\r\n"
+                        + "\r\n"
+                        + "a;\r\n"
+                        + "0123456789\r\n"
+                        + "1a\r\n"
+                        + "ABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n"
+                        + "0\r\n");
+        HttpParser.RequestHandler handler = new Handler();
+        HttpParser parser = new HttpParser(handler);
+        parseAll(parser, buffer);
+        parser.atEOF();
+        parser.parseNext(BufferUtil.EMPTY_BUFFER);
 
         Assert.assertEquals("GET", _methodOrVersion);
         Assert.assertEquals("/chunk", _uriOrStatus);
@@ -1450,7 +1572,7 @@ public class HttpParserTest
 
         parser.parseNext(buffer);
         Assert.assertEquals("POST", _methodOrVersion);
-        Assert.assertEquals("Duplicate Content-Length", _bad);
+        Assert.assertEquals("Duplicate Content-Lengths", _bad);
         Assert.assertFalse(buffer.hasRemaining());
         Assert.assertEquals(HttpParser.State.CLOSE, parser.getState());
         parser.atEOF();
@@ -1474,7 +1596,7 @@ public class HttpParserTest
 
         parser.parseNext(buffer);
         Assert.assertEquals("POST", _methodOrVersion);
-        Assert.assertEquals("Duplicate Content-Length", _bad);
+        Assert.assertEquals("Duplicate Content-Lengths", _bad);
         Assert.assertFalse(buffer.hasRemaining());
         Assert.assertEquals(HttpParser.State.CLOSE, parser.getState());
         parser.atEOF();
@@ -1497,7 +1619,7 @@ public class HttpParserTest
                         + "\r\n");
 
         HttpParser.RequestHandler handler = new Handler();
-        HttpParser parser = new HttpParser(handler);
+        HttpParser parser = new HttpParser(handler,HttpCompliance.RFC2616);
         parseAll(parser, buffer);
 
         Assert.assertEquals("POST", _methodOrVersion);
@@ -1524,7 +1646,7 @@ public class HttpParserTest
                         + "\r\n");
 
         HttpParser.RequestHandler handler = new Handler();
-        HttpParser parser = new HttpParser(handler);
+        HttpParser parser = new HttpParser(handler,HttpCompliance.RFC2616);
         parseAll(parser, buffer);
 
         Assert.assertEquals("POST", _methodOrVersion);
@@ -1632,16 +1754,19 @@ public class HttpParserTest
     @Test
     public void testBadIPv6Host() throws Exception
     {
-        ByteBuffer buffer = BufferUtil.toBuffer(
+        try(StacklessLogging s = new StacklessLogging(HttpParser.class))
+        {
+            ByteBuffer buffer = BufferUtil.toBuffer(
                 "GET / HTTP/1.1\r\n"
-                        + "Host: [::1\r\n"
-                        + "Connection: close\r\n"
-                        + "\r\n");
+                    + "Host: [::1\r\n"
+                    + "Connection: close\r\n"
+                    + "\r\n");
 
-        HttpParser.RequestHandler handler = new Handler();
-        HttpParser parser = new HttpParser(handler);
-        parser.parseNext(buffer);
-        Assert.assertThat(_bad, Matchers.containsString("Bad"));
+            HttpParser.RequestHandler handler = new Handler();
+            HttpParser parser = new HttpParser(handler);
+            parser.parseNext(buffer);
+            Assert.assertThat(_bad, Matchers.containsString("Bad"));
+        }
     }
 
     @Test
@@ -1884,6 +2009,12 @@ public class HttpParserTest
             }
 
             _headerCompleted = true;
+            return false;
+        }
+
+        @Override
+        public boolean contentComplete()
+        {
             return false;
         }
 

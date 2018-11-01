@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -19,8 +19,6 @@
 package org.eclipse.jetty.io;
 
 import java.nio.ByteBuffer;
-
-import org.eclipse.jetty.util.BufferUtil;
 
 public class ArrayByteBufferPool implements ByteBufferPool
 {
@@ -63,8 +61,8 @@ public class ArrayByteBufferPool implements ByteBufferPool
         for (int i=0;i<_direct.length;i++)
         {
             size+=_inc;
-            _direct[i]=new ByteBufferPool.Bucket(size,_maxQueue);
-            _indirect[i]=new ByteBufferPool.Bucket(size,_maxQueue);
+            _direct[i]=new ByteBufferPool.Bucket(this,size,_maxQueue);
+            _indirect[i]=new ByteBufferPool.Bucket(this,size,_maxQueue);
         }
     }
 
@@ -73,7 +71,7 @@ public class ArrayByteBufferPool implements ByteBufferPool
     {
         ByteBufferPool.Bucket bucket = bucketFor(size,direct);
         if (bucket==null)
-            return direct ? BufferUtil.allocateDirect(size) : BufferUtil.allocate(size);
+            return newByteBuffer(size,direct);
             
         return bucket.acquire(direct);
             

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -27,13 +27,13 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
+import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.security.ConstraintMapping;
 import org.eclipse.jetty.security.ConstraintSecurityHandler;
 import org.eclipse.jetty.security.HashLoginService;
 import org.eclipse.jetty.security.authentication.BasicAuthenticator;
 import org.eclipse.jetty.server.AbstractConnector;
 import org.eclipse.jetty.server.Connector;
-import org.eclipse.jetty.server.ConnectorStatistics;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.NCSARequestLog;
 import org.eclipse.jetty.server.Server;
@@ -50,11 +50,13 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.servlet.StatisticsServlet;
 import org.eclipse.jetty.util.RolloverFileOutputStream;
+import org.eclipse.jetty.util.StringUtil;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 import org.eclipse.jetty.util.resource.Resource;
 import org.eclipse.jetty.util.security.Constraint;
 import org.eclipse.jetty.webapp.WebAppContext;
+import org.eclipse.jetty.webapp.WebInfConfiguration;
 import org.eclipse.jetty.xml.XmlConfiguration;
 
 /**
@@ -395,15 +397,15 @@ public class Runner
                                 connector.setHost(host);
                             _server.addConnector(connector);
                             if (_enableStats)
-                                connector.addBean(new ConnectorStatistics());
+                                connector.addBean(new ConnectionStatistics());
                         } 
                         else 
                         {
                             if (_enableStats) 
                             {
-                                for (Connector connector : connectors) 
+                                for (Connector connector : connectors)
                                 {
-                                    ((AbstractConnector) connector).addBean(new ConnectorStatistics());
+                                    ((AbstractConnector) connector).addBean(new ConnectionStatistics());
                                 }
                             }
                         }
@@ -430,14 +432,33 @@ public class Runner
                             if (contextPathSet)
                                 handler.setContextPath(contextPath);
                             _contexts.addHandler(handler);
-                            handler.setAttribute("org.eclipse.jetty.server.webapp.ContainerIncludeJarPattern", __containerIncludeJarPattern);
+                            String containerIncludeJarPattern = (String)handler.getAttribute(WebInfConfiguration.CONTAINER_JAR_PATTERN);
+                            if (containerIncludeJarPattern == null)
+                                containerIncludeJarPattern = __containerIncludeJarPattern;
+                            else
+                            {
+                                if (!containerIncludeJarPattern.contains(__containerIncludeJarPattern))
+                                {
+                                    containerIncludeJarPattern = containerIncludeJarPattern+(StringUtil.isBlank(containerIncludeJarPattern)?"":"|")+ __containerIncludeJarPattern;
+                                }
+                            }
+
+                            handler.setAttribute(WebInfConfiguration.CONTAINER_JAR_PATTERN, containerIncludeJarPattern);
+                            
+                            //check the configurations, if not explicitly set up, then configure all of them
+                            if (handler instanceof WebAppContext)
+                            {
+                                WebAppContext wac = (WebAppContext)handler;
+                                if (wac.getConfigurationClasses() == null || wac.getConfigurationClasses().length == 0)
+                                    wac.setConfigurationClasses(__plusConfigurationClasses);
+                            }
                         }
                         else 
                         {
                             // assume it is a WAR file
                             WebAppContext webapp = new WebAppContext(_contexts, ctx.toString(), contextPath);
                             webapp.setConfigurationClasses(__plusConfigurationClasses);
-                            webapp.setAttribute("org.eclipse.jetty.server.webapp.ContainerIncludeJarPattern",
+                            webapp.setAttribute(WebInfConfiguration.CONTAINER_JAR_PATTERN,
                                     __containerIncludeJarPattern);
                         }
                     }
@@ -477,6 +498,8 @@ public class Runner
             _logHandler.setRequestLog(requestLog);
         }
     }
+    
+
 
     protected void prependHandler (Handler handler, HandlerCollection handlers)
     {

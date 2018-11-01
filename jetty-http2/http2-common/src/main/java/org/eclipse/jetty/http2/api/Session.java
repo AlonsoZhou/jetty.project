@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -195,9 +195,23 @@ public interface Session
         /**
          * <p>Callback method invoked when a GOAWAY frame has been received.</p>
          *
-         * @param session the session
-         * @param frame   the GOAWAY frame received
+         * @param session  the session
+         * @param frame    the GOAWAY frame received
+         * @param callback the callback to notify of the GOAWAY processing
          */
+        public default void onClose(Session session, GoAwayFrame frame, Callback callback)
+        {
+            try
+            {
+                onClose(session, frame);
+                callback.succeeded();
+            }
+            catch (Throwable x)
+            {
+                callback.failed(x);
+            }
+        }
+
         public void onClose(Session session, GoAwayFrame frame);
 
         /**
@@ -210,9 +224,23 @@ public interface Session
         /**
          * <p>Callback method invoked when a failure has been detected for this session.</p>
          *
-         * @param session the session
-         * @param failure the failure
+         * @param session  the session
+         * @param failure  the failure
+         * @param callback the callback to notify of failure processing
          */
+        public default void onFailure(Session session, Throwable failure, Callback callback)
+        {
+            try
+            {
+                onFailure(session, failure);
+                callback.succeeded();
+            }
+            catch (Throwable x)
+            {
+                callback.failed(x);
+            }
+        }
+
         public void onFailure(Session session, Throwable failure);
 
         /**

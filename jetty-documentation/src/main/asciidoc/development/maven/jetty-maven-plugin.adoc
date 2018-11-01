@@ -1,5 +1,6 @@
+//
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ========================================================================
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -13,6 +14,7 @@
 //
 //  You may elect to redistribute this code under either of these licenses.
 //  ========================================================================
+//
 
 [[jetty-maven-plugin]]
 === Configuring the Jetty Maven Plugin
@@ -723,6 +725,7 @@ mvn jetty:stop
 The `stopPort` must be free on the machine you are running on.
 If this is not the case, you will get an "Address already in use" error message after the "Started ServerConnector ..." message.
 
+[[jetty-effective-web-xml]]
 ==== jetty:effective-web-xml
 
 This goal calculates a synthetic `web.xml` (the "effective web.xml") according to the rules of the Servlet Specification taking into account all sources of discoverable configuration of web components in your application: descriptors (`webdefault.xml`, `web.xml`, `web-fragment.xml`s, `web-override.xml`) and discovered annotations (`@WebServlet`, `@WebFilter`, `@WebListener`).

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -122,10 +122,17 @@ public abstract class AbstractEndPoint extends IdleTimeout implements EndPoint
     }
 
     @Override
-    public void fillInterested(Callback callback) throws IllegalStateException
+    public void fillInterested(Callback callback)
     {
         notIdle();
         _fillInterest.register(callback);
+    }
+
+    @Override
+    public boolean tryFillInterested(Callback callback)
+    {
+        notIdle();
+        return _fillInterest.tryRegister(callback);
     }
 
     @Override

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -23,28 +23,30 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
-import java.net.URLClassLoader;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
-import java.util.jar.JarEntry;
-import java.util.jar.JarInputStream;
+import java.util.concurrent.ConcurrentHashMap;
 
-import org.eclipse.jetty.util.ConcurrentHashSet;
+import org.eclipse.jetty.util.JavaVersion;
 import org.eclipse.jetty.util.Loader;
 import org.eclipse.jetty.util.MultiException;
+import org.eclipse.jetty.util.MultiReleaseJarFile;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 import org.eclipse.jetty.util.resource.Resource;
-import org.eclipse.jetty.webapp.JarScanner;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
-
 
 /**
  * AnnotationParser
@@ -67,11 +69,65 @@ import org.objectweb.asm.Opcodes;
 public class AnnotationParser
 {
     private static final Logger LOG = Log.getLogger(AnnotationParser.class);
-
-    protected Set<String> _parsedClassNames = new ConcurrentHashSet<String>();
+    protected static int ASM_OPCODE_VERSION = Opcodes.ASM6; //compatibility of api
     
-    protected static int ASM_OPCODE_VERSION = Opcodes.ASM5; //compatibility of api
-   
+    protected Map<String, List<String>> _parsedClassNames = new ConcurrentHashMap<>();
+    private final int _javaPlatform;
+    private int _asmVersion;
+
+    /**
+     * Determine the runtime version of asm.
+     * @return the org.objectweb.asm.Opcode matching the runtime version of asm.
+     */
+    public static int asmVersion ()
+    {
+        int asmVersion = ASM_OPCODE_VERSION;
+        Package asm = Package.getPackage("org.objectweb.asm");
+        if (asm == null)
+            LOG.warn("Unknown asm runtime version, assuming version {}", asmVersion);
+        else
+        {
+            String s = asm.getImplementationVersion();
+            if (s==null)
+                LOG.warn("Unknown asm runtime version, assuming version {}", asmVersion);
+            else
+            {
+                int dot = s.indexOf('.');
+                s = s.substring(0, (dot < 0 ? s.length() : dot)).trim();
+                try
+                {
+                    int v = Integer.parseInt(s);
+                    switch (v)
+                    {
+                        case 4:
+                        {
+                            asmVersion = Opcodes.ASM4;
+                            break;
+                        }
+                        case 5:
+                        {
+                            asmVersion = Opcodes.ASM5;
+                            break;
+                        }
+                        case 6:
+                        {
+                            asmVersion = Opcodes.ASM6;
+                            break;
+                        }
+                        default:
+                        {
+                            LOG.warn("Unrecognized runtime asm version, assuming {}", asmVersion);
+                        }
+                    }
+                }
+                catch (NumberFormatException e)
+                {
+                    LOG.warn("Unable to parse runtime asm version, assuming version {}", asmVersion);
+                }
+            }
+        }
+        return asmVersion;
+    }
 
     /**
      * Convert internal name to simple name
@@ -110,12 +166,8 @@ public class AnnotationParser
         return normalList;
     }
 
-    
     /**
-     * ClassInfo
-     * 
      * Immutable information gathered by parsing class header.
-     * 
      */
     public class ClassInfo 
     {
@@ -175,10 +227,7 @@ public class AnnotationParser
         }
     }
 
-    
     /**
-     * MethodInfo
-     * 
      * Immutable information gathered by parsing a method on a class.
      */
     public class MethodInfo
@@ -231,14 +280,9 @@ public class AnnotationParser
             return _exceptions;
         }
     }
-    
-    
-    
+
     /**
-     * FieldInfo
-     *
      * Immutable information gathered by parsing a field on a class.
-     * 
      */
     public class FieldInfo
     {
@@ -292,8 +336,6 @@ public class AnnotationParser
     }
     
     /**
-     * Handler
-     *
      * Signature for all handlers that respond to parsing class files.
      */
     public static interface Handler
@@ -307,55 +349,42 @@ public class AnnotationParser
     }
     
     /**
-     * AbstractHandler
-     *
      * Convenience base class to provide no-ops for all Handler methods.
      */
     public static abstract class AbstractHandler implements Handler
     {
-
         @Override
         public void handle(ClassInfo classInfo)
         {
-           //no-op
         }
 
         @Override
         public void handle(MethodInfo methodInfo)
         {
-            // no-op           
         }
 
         @Override
         public void handle(FieldInfo fieldInfo)
         {
-            // no-op 
         }
 
         @Override
         public void handle(ClassInfo info, String annotationName)
         {
-            // no-op 
         }
 
         @Override
         public void handle(MethodInfo info, String annotationName)
         {
-            // no-op            
         }
 
         @Override
         public void handle(FieldInfo info, String annotationName)
         {
-           // no-op
-        }        
+        }
     }
 
-    
-    
     /**
-     * MyMethodVisitor
-     * 
      * ASM Visitor for parsing a method. We are only interested in the annotations on methods.
      */
     public class MyMethodVisitor extends MethodVisitor
@@ -369,18 +398,16 @@ public class AnnotationParser
                                final String name,
                                final String methodDesc,
                                final String signature,
-                               final String[] exceptions)
+                               final String[] exceptions,
+                               final int asmVersion)
         {
-            super(ASM_OPCODE_VERSION);
+            super(asmVersion);
             _handlers = handlers;
             _mi = new MethodInfo(classInfo, name, access, methodDesc,signature, exceptions);
         }
 
-        
         /**
          * We are only interested in finding the annotations on methods.
-         * 
-         * @see org.objectweb.asm.MethodVisitor#visitAnnotation(java.lang.String, boolean)
          */
         @Override
         public AnnotationVisitor visitAnnotation(String desc, boolean visible)
@@ -392,39 +419,31 @@ public class AnnotationParser
         }
     }
 
-
-    
     /**
-     * MyFieldVisitor
-     * 
-     * An ASM visitor for parsing Fields. 
+     * An ASM visitor for parsing Fields.
      * We are only interested in visiting annotations on Fields.
-     *
      */
     public class MyFieldVisitor extends FieldVisitor
     {   
         final FieldInfo _fieldInfo;
         final Set<? extends Handler> _handlers;
-        
-    
+
         public MyFieldVisitor(final Set<? extends Handler> handlers,
                               final ClassInfo classInfo,
                               final int access,
                               final String fieldName,
                               final String fieldType,
                               final String signature,
-                              final Object value)
+                              final Object value,
+                              final int asmVersion)
         {
-            super(ASM_OPCODE_VERSION);
+            super(asmVersion);
             _handlers = handlers;
             _fieldInfo = new FieldInfo(classInfo, fieldName, access, fieldType, signature, value);
         }
 
-
         /**
          * Parse an annotation found on a Field.
-         * 
-         * @see org.objectweb.asm.FieldVisitor#visitAnnotation(java.lang.String, boolean)
          */
         @Override
         public AnnotationVisitor visitAnnotation(String desc, boolean visible)
@@ -437,28 +456,23 @@ public class AnnotationParser
         }
     }
 
-  
-
-
     /**
-     * MyClassVisitor
-     *
      * ASM visitor for a class.
      */
     public class MyClassVisitor extends ClassVisitor
     {
-
+        int _asmVersion;
         final Resource _containingResource;
         final Set<? extends Handler> _handlers;
         ClassInfo _ci;
         
-        public MyClassVisitor(Set<? extends Handler> handlers, Resource containingResource)
+        public MyClassVisitor(Set<? extends Handler> handlers, Resource containingResource, int asmVersion)
         {
-            super(ASM_OPCODE_VERSION);
+            super(asmVersion);
+            _asmVersion = asmVersion;
             _handlers = handlers;
             _containingResource = containingResource;
         }
-
 
         @Override
         public void visit (final int version,
@@ -469,18 +483,12 @@ public class AnnotationParser
                            final String[] interfaces)
         {           
             _ci = new ClassInfo(_containingResource, normalize(name), version, access, signature, normalize(superName), normalize(interfaces));
-            
-            _parsedClassNames.add(_ci.getClassName());                 
-
             for (Handler h:_handlers)
                h.handle(_ci);
         }
-        
 
         /**
          * Visit an annotation on a Class
-         * 
-         * @see org.objectweb.asm.ClassVisitor#visitAnnotation(java.lang.String, boolean)
          */
         @Override
         public AnnotationVisitor visitAnnotation (String desc, boolean visible)
@@ -488,15 +496,11 @@ public class AnnotationParser
             String annotationName = normalize(desc);
             for (Handler h : _handlers)
                 h.handle(_ci, annotationName);
-
             return null;
         }
 
-
         /**
          * Visit a method to extract its annotations
-         * 
-         * @see org.objectweb.asm.ClassVisitor#visitMethod(int, java.lang.String, java.lang.String, java.lang.String, java.lang.String[])
          */
         @Override
         public MethodVisitor visitMethod (final int access,
@@ -505,14 +509,11 @@ public class AnnotationParser
                                           final String signature,
                                           final String[] exceptions)
         {
-
-            return new MyMethodVisitor(_handlers, _ci, access, name, methodDesc, signature, exceptions);
+            return new MyMethodVisitor(_handlers, _ci, access, name, methodDesc, signature, exceptions, _asmVersion);
         }
 
         /**
          * Visit a field to extract its annotations
-         * 
-         * @see org.objectweb.asm.ClassVisitor#visitField(int, java.lang.String, java.lang.String, java.lang.String, java.lang.Object)
          */
         @Override
         public FieldVisitor visitField (final int access,
@@ -521,11 +522,56 @@ public class AnnotationParser
                                         final String signature,
                                         final Object value)
         {
-            return new MyFieldVisitor(_handlers, _ci, access, fieldName, fieldType, signature, value);
+            return new MyFieldVisitor(_handlers, _ci, access, fieldName, fieldType, signature, value, _asmVersion);
         }
     }
+    
+    public AnnotationParser()
+    {
+        this(JavaVersion.VERSION.getPlatform());
+    }
 
- 
+    /**
+     * @param javaPlatform The target java version or 0 for the current runtime.
+     */
+    public AnnotationParser(int javaPlatform)
+    {
+        _asmVersion = asmVersion();
+        if (javaPlatform==0)
+            javaPlatform = JavaVersion.VERSION.getPlatform();
+        _javaPlatform = javaPlatform;
+    }
+    
+    
+    public AnnotationParser(int javaPlatform, int asmVersion)
+    {
+        if (javaPlatform==0)
+            javaPlatform = JavaVersion.VERSION.getPlatform();
+        _javaPlatform = javaPlatform;
+        if (asmVersion==0)
+            asmVersion = ASM_OPCODE_VERSION;
+        _asmVersion = asmVersion;
+    }
+    
+    /**
+     * Add a class as having been parsed.
+     * 
+     * @param classname the name of the class
+     * @param location the fully qualified location of the class
+     */
+    public void addParsedClass (String classname, Resource location)
+    {
+        List<String> list = new ArrayList<>(1);
+        if (location != null)
+            list.add(location.toString());
+
+        List<String> existing = _parsedClassNames.putIfAbsent(classname, list);
+        if (existing != null)
+        {
+            existing.addAll(list);
+            LOG.warn("{} scanned from multiple locations: {}", classname, existing);
+        }
+    }
 
     /**
      * True if the class has already been processed, false otherwise
@@ -534,11 +580,24 @@ public class AnnotationParser
      */
     public boolean isParsed (String className)
     {
-        return _parsedClassNames.contains(className);
+        return _parsedClassNames.containsKey(className);
+    }
+    
+    /**
+     * Get the locations of the given classname. There may be more than one
+     * location if there are duplicates of the same class.
+     * 
+     * @param classname the name of the class
+     * @return an immutable list of locations
+     */
+    public List<String> getParsedLocations (String classname)
+    {
+        List<String> list = _parsedClassNames.get(classname);
+        if (list == null)
+            return Collections.emptyList();
+        return Collections.unmodifiableList(list);
     }
 
-    
-    
     /**
      * Parse a given class
      * 
@@ -557,11 +616,13 @@ public class AnnotationParser
         {
             if (!isParsed(className) || resolver.shouldOverride(className))
             {
+                String tmp = className;
                 className = className.replace('.', '/')+".class";
-                URL resource = Loader.getResource(this.getClass(), className);
+                URL resource = Loader.getResource(this.getClass(),className);
                 if (resource!= null)
                 {
                     Resource r = Resource.newResource(resource);
+                    addParsedClass(tmp, r);
                     try (InputStream is = r.getInputStream())
                     {
                         scanClass(handlers, null, is);
@@ -571,8 +632,6 @@ public class AnnotationParser
         }
     }
 
-    
-    
     /**
      * Parse the given class, optionally walking its inheritance hierarchy
      * 
@@ -586,17 +645,18 @@ public class AnnotationParser
     throws Exception
     {
         Class<?> cz = clazz;
-        while (cz != null)
+        while (cz != Object.class)
         {
             if (!resolver.isExcluded(cz.getName()))
             {
                 if (!isParsed(cz.getName()) || resolver.shouldOverride(cz.getName()))
                 {
                     String nameAsResource = cz.getName().replace('.', '/')+".class";
-                    URL resource = Loader.getResource(this.getClass(), nameAsResource);
+                    URL resource = Loader.getResource(this.getClass(),nameAsResource);
                     if (resource!= null)
                     {
                         Resource r = Resource.newResource(resource);
+                        addParsedClass(clazz.getName(), r);
                         try (InputStream is =  r.getInputStream())
                         {
                             scanClass(handlers, null, is);
@@ -608,12 +668,10 @@ public class AnnotationParser
             if (visitSuperClasses)
                 cz = cz.getSuperclass();
             else
-                cz = null;
+                break;
         }
     }
 
-    
-    
     /**
      * Parse the given classes
      * 
@@ -631,7 +689,6 @@ public class AnnotationParser
         parse(handlers, Arrays.asList(classNames), resolver);
     }
 
-    
     /**
      * Parse the given classes
      * 
@@ -644,18 +701,20 @@ public class AnnotationParser
     throws Exception
     {
         MultiException me = new MultiException();
-        
+
         for (String s:classNames)
         {
             try
             {
                 if ((resolver == null) || (!resolver.isExcluded(s) &&  (!isParsed(s) || resolver.shouldOverride(s))))
                 {
+                    String name = s;
                     s = s.replace('.', '/')+".class";
-                    URL resource = Loader.getResource(this.getClass(), s);
+                    URL resource = Loader.getResource(this.getClass(),s);
                     if (resource!= null)
                     {
                         Resource r = Resource.newResource(resource);
+                        addParsedClass(name, r);
                         try (InputStream is = r.getInputStream())
                         {
                             scanClass(handlers, null, is);
@@ -671,67 +730,69 @@ public class AnnotationParser
         me.ifExceptionThrow();
     }
 
-    
     /**
      * Parse all classes in a directory
      * 
      * @param handlers the set of handlers to look for classes in 
-     * @param dir the resource directory to look for classes
+     * @param root the resource directory to look for classes
      * @param resolver the class name resolver
      * @throws Exception if unable to parse
      */
-    protected void parseDir (Set<? extends Handler> handlers, Resource dir, ClassNameResolver resolver)
-    throws Exception
+    protected void parseDir (Set<? extends Handler> handlers, Resource root, ClassNameResolver resolver) throws Exception
     {
-        // skip dirs whose name start with . (ie hidden)
-        if (!dir.isDirectory() || !dir.exists() || dir.getName().startsWith("."))
+        if (!root.isDirectory() || !root.exists() || root.getName().startsWith("."))
             return;
 
-        if (LOG.isDebugEnabled()) {LOG.debug("Scanning dir {}", dir);};
-
-        MultiException me = new MultiException();
+        if (LOG.isDebugEnabled())
+            LOG.debug("Scanning dir {}", root);
         
-        String[] files=dir.list();
-        for (int f=0;files!=null && f<files.length;f++)
+        File rootFile = root.getFile();
+        
+        MultiException me = new MultiException();
+        Collection<Resource> resources = root.getAllResources();
+        if (resources != null)
         {
-            Resource res = dir.addPath(files[f]);
-            if (res.isDirectory())
-                parseDir(handlers, res, resolver);
-            else
+            for (Resource r:resources)
             {
-                //we've already verified the directories, so just verify the class file name
-                File file = res.getFile();
-                if (isValidClassFileName((file==null?null:file.getName())))
+                if (r.isDirectory())
+                    continue;
+
+                String name = r.getName();
+                if ((resolver == null)|| (!resolver.isExcluded(name) && (!isParsed(name) || resolver.shouldOverride(name))))
                 {
-                    try
+                    File file = r.getFile();                                      
+                    if (isValidClassFileName((file==null?null:file.getName())))
                     {
-                        String name = res.getName();
-                        if ((resolver == null)|| (!resolver.isExcluded(name) && (!isParsed(name) || resolver.shouldOverride(name))))
+                        Path classpath = rootFile.toPath().relativize(file.toPath());
+                        String str = classpath.toString();
+                        str = str.substring(0, str.lastIndexOf(".class")).replace('/', '.').replace('\\', '.');
+
+                        try
                         {
-                            Resource r = Resource.newResource(res.getURL());
-                            if (LOG.isDebugEnabled()) {LOG.debug("Scanning class {}", r);};
+                            if (LOG.isDebugEnabled())
+                                LOG.debug("Scanning class {}", r);
+                            addParsedClass(str, r);
                             try (InputStream is=r.getInputStream())
                             {
-                                scanClass(handlers, dir, is);
+                                scanClass(handlers, Resource.newResource(file.getParentFile()), is);
                             }
+                        }                  
+                        catch (Exception ex)
+                        {
+                            if (LOG.isDebugEnabled()) LOG.debug("Error scanning file "+file, ex);
+                            me.add(new RuntimeException("Error scanning file "+file,ex));
                         }
-                    }                  
-                    catch (Exception ex)
-                    {
-                        if (LOG.isDebugEnabled()) LOG.debug("Error scanning file "+files[f], ex);
-                        me.add(new RuntimeException("Error scanning file "+files[f],ex));
                     }
-                }
-                else
-                {
-                   if (LOG.isDebugEnabled()) LOG.debug("Skipping scan on invalid file {}", res);
+                    else
+                    {
+                        if (LOG.isDebugEnabled()) LOG.debug("Skipping scan on invalid file {}", file);
+                    }
                 }
             }
         }
-
+        
         me.ifExceptionThrow();
     }
-
 
     /**
      * Parse classes in the supplied classloader. 
@@ -741,41 +802,13 @@ public class AnnotationParser
      * @param loader the classloader for the classes
      * @param visitParents if true, visit parent classloaders too
      * @param nullInclusive if true, an empty pattern means all names match, if false, none match
-     * @param resolver the class name resolver
      * @throws Exception if unable to parse
      */
-    public void parse (final Set<? extends Handler> handlers, ClassLoader loader, boolean visitParents, boolean nullInclusive, final ClassNameResolver resolver)
-    throws Exception
+    @Deprecated
+    public void parse (final Set<? extends Handler> handlers, ClassLoader loader, boolean visitParents, boolean nullInclusive) throws Exception
     {
-        if (loader==null)
-            return;
-
-        if (!(loader instanceof URLClassLoader))
-            return; //can't extract classes?
-
-        final MultiException me = new MultiException();
-        
-        JarScanner scanner = new JarScanner()
-        {
-            @Override
-            public void processEntry(URI jarUri, JarEntry entry)
-            {
-                try
-                {
-                    parseJarEntry(handlers, Resource.newResource(jarUri), entry, resolver);
-                }
-                catch (Exception e)
-                {
-                    me.add(new RuntimeException("Error parsing entry "+entry.getName()+" from jar "+ jarUri, e));
-                }
-            }
-
-        };
-
-        scanner.scan(null, loader, nullInclusive, visitParents);
-        me.ifExceptionThrow();
+        throw new UnsupportedOperationException();
     }
-
 
     /**
      * Parse classes in the supplied uris.
@@ -824,7 +857,6 @@ public class AnnotationParser
         parse (handlers, Resource.newResource(uri), resolver);
     }
 
-    
     /**
      * Parse a resource
      * 
@@ -864,9 +896,6 @@ public class AnnotationParser
         if (LOG.isDebugEnabled()) LOG.warn("Resource not scannable for classes: {}", r);
     }
 
-    
-  
-
     /**
      * Parse a resource that is a jar file.
      * 
@@ -875,7 +904,7 @@ public class AnnotationParser
      * @param resolver the class name resolver
      * @throws Exception if unable to parse
      */
-    protected void parseJar (Set<? extends Handler> handlers, Resource jarResource,  final ClassNameResolver resolver)
+    protected void parseJar (Set<? extends Handler> handlers, Resource jarResource, final ClassNameResolver resolver)
     throws Exception
     {
         if (jarResource == null)
@@ -883,55 +912,38 @@ public class AnnotationParser
        
         if (jarResource.toString().endsWith(".jar"))
         {
-            if (LOG.isDebugEnabled()) {LOG.debug("Scanning jar {}", jarResource);};
-
-            //treat it as a jar that we need to open and scan all entries from  
-            InputStream in = jarResource.getInputStream();
-            if (in==null)
-                return;
+            if (LOG.isDebugEnabled())
+                LOG.debug("Scanning jar {}", jarResource);
 
             MultiException me = new MultiException();
-            JarInputStream jar_in = new JarInputStream(in);
-            try
-            { 
-                JarEntry entry = jar_in.getNextJarEntry();
-                while (entry!=null)
-                {      
+            try (MultiReleaseJarFile jarFile = new MultiReleaseJarFile(jarResource.getFile(),_javaPlatform,false))
+            {
+                jarFile.stream().forEach(e->
+                {
                     try
                     {
-                        parseJarEntry(handlers, jarResource, entry, resolver);                        
+                        parseJarEntry(handlers, jarResource, e, resolver);
                     }
-                    catch (Exception e)
+                    catch (Exception ex)
                     {
-                        me.add(new RuntimeException("Error scanning entry "+entry.getName()+" from jar "+jarResource, e));
+                        me.add(new RuntimeException("Error scanning entry " + e.getName() + " from jar " + jarResource, ex));
                     }
-                    entry = jar_in.getNextJarEntry();
-                }
+                });
             }
-            catch (Exception e)
-            {
-                me.add(new RuntimeException("Error scanning jar "+jarResource, e));
-            }
-            finally
-            {
-                jar_in.close();
-            }
-            
             me.ifExceptionThrow();
-        }        
+        }
     }
 
     /**
      * Parse a single entry in a jar file
      * 
      * @param handlers the handlers to look for classes in  
-     * @param jar the jar resource to parse
-     * @param entry the entry in the jar resource to parse
+     * @param jar The jar from which entry was obtained
+     * @param entry the entry in the potentially MultiRelease jar resource to parse
      * @param resolver the class name resolver
      * @throws Exception if unable to parse
      */
-    protected void parseJarEntry (Set<? extends Handler> handlers, Resource jar, JarEntry entry, final ClassNameResolver resolver)
-    throws Exception
+    protected void parseJarEntry (Set<? extends Handler> handlers, Resource jar, MultiReleaseJarFile.VersionedJarEntry entry,final ClassNameResolver resolver) throws Exception
     {
         if (jar == null || entry == null)
             return;
@@ -946,22 +958,20 @@ public class AnnotationParser
         if (isValidClassFileName(name) && isValidClassFilePath(name))
         {
             String shortName =  name.replace('/', '.').substring(0,name.length()-6);
-
             if ((resolver == null)
                     ||
-               (!resolver.isExcluded(shortName) && (!isParsed(shortName) || resolver.shouldOverride(shortName))))
+                    (!resolver.isExcluded(shortName) && (!isParsed(shortName) || resolver.shouldOverride(shortName))))
             {
-                Resource clazz = Resource.newResource("jar:"+jar.getURI()+"!/"+name);
-                if (LOG.isDebugEnabled()) {LOG.debug("Scanning class from jar {}", clazz);};
-                try (InputStream is = clazz.getInputStream())
+                addParsedClass(shortName, Resource.newResource("jar:"+jar.getURI()+"!/"+entry.getNameInJar()));
+                if (LOG.isDebugEnabled())
+                    LOG.debug("Scanning class from jar {}!/{}", jar, entry);
+                try (InputStream is = entry.getInputStream())
                 {
                     scanClass(handlers, jar, is);
                 }
             }
         }
     }
-    
-    
 
     /**
      * Use ASM on a class
@@ -971,13 +981,20 @@ public class AnnotationParser
      * @param is the input stream to parse
      * @throws IOException if unable to parse
      */
-    protected void scanClass (Set<? extends Handler> handlers, Resource containingResource, InputStream is)
-    throws IOException
+    protected void scanClass (Set<? extends Handler> handlers, Resource containingResource, InputStream is) throws IOException
     {
         ClassReader reader = new ClassReader(is);
-        reader.accept(new MyClassVisitor(handlers, containingResource), ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
+        reader.accept(new MyClassVisitor(handlers, containingResource, _asmVersion), ClassReader.SKIP_CODE|ClassReader.SKIP_DEBUG|ClassReader.SKIP_FRAMES);
     }
     
+    /**
+     * Remove any parsed class names.
+     */
+    public void resetParsedClasses ()
+    {
+        _parsedClassNames.clear();
+    }
+
     /**
      * Check that the given path represents a valid class file name.
      * The check is fairly cursory, checking that:
@@ -986,8 +1003,8 @@ public class AnnotationParser
      * <li> it isn't a dot file or in a hidden directory </li>
      * <li> the name of the class at least begins with a valid identifier for a class name </li>
      * </ul>
-     * @param name
-     * @return
+     * @param name the class file name
+     * @return whether the class file name is valid
      */
     private boolean isValidClassFileName (String name)
     {
@@ -996,9 +1013,16 @@ public class AnnotationParser
             return false;
 
         //skip anything that is not a class file
-        if (!name.toLowerCase(Locale.ENGLISH).endsWith(".class"))
+        String lc = name.toLowerCase(Locale.ENGLISH);
+        if (!lc.endsWith(".class"))
         {
             if (LOG.isDebugEnabled()) LOG.debug("Not a class: {}",name);
+            return false;
+        }
+        
+        if (lc.equals("module-info.class"))
+        {
+            if (LOG.isDebugEnabled()) LOG.debug("Skipping module-info.class");
             return false;
         }
 
@@ -1008,19 +1032,18 @@ public class AnnotationParser
         c0 = (ldir > -1 ? ldir+1 : c0);
         if (!Character.isJavaIdentifierStart(name.charAt(c0)))
         {
-            if (LOG.isDebugEnabled()) LOG.debug("Not a java identifier: {}"+name);
+            if (LOG.isDebugEnabled()) LOG.debug("Not a java identifier: {}",name);
             return false;
         }
    
         return true;
     }
-    
-    
+
     /**
      * Check that the given path does not contain hidden directories
      *
-     * @param path
-     * @return
+     * @param path the class file path
+     * @return whether the class file path is valid
      */
     private boolean isValidClassFilePath (String path)
     {
@@ -1028,14 +1051,13 @@ public class AnnotationParser
         if (path == null || path.length()==0)
             return false;
 
-        //skip any classfiles that are in a hidden directory
+        // skip any classfiles that are in a hidden directory
         if (path.startsWith(".") || path.contains("/."))
         {
-            if (LOG.isDebugEnabled()) LOG.debug("Contains hidden dirs: {}"+path);
+            if (LOG.isDebugEnabled()) LOG.debug("Contains hidden dirs: " + path);
             return false;
         }
 
         return true;
     }
 }
-

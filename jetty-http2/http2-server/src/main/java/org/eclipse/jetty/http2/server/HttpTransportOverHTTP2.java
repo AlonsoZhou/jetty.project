@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -21,6 +21,7 @@ package org.eclipse.jetty.http2.server;
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.http.MetaData;
 import org.eclipse.jetty.http2.ErrorCode;
@@ -43,7 +44,7 @@ public class HttpTransportOverHTTP2 implements HttpTransport
     private static final Logger LOG = Log.getLogger(HttpTransportOverHTTP2.class);
 
     private final AtomicBoolean commit = new AtomicBoolean();
-    private final Callback commitCallback = new CommitCallback();
+    private final TransportCallback transportCallback = new TransportCallback();
     private final Connector connector;
     private final HTTP2ServerConnection connection;
     private IStream stream;
@@ -83,29 +84,36 @@ public class HttpTransportOverHTTP2 implements HttpTransport
     @Override
     public void send(MetaData.Response info, boolean isHeadRequest, ByteBuffer content, boolean lastContent, Callback callback)
     {
-        // info != null | content != 0 | last = true => commit + send/end
-        // info != null | content != 0 | last = false => commit + send
-        // info != null | content == 0 | last = true => commit/end
-        // info != null | content == 0 | last = false => commit
-        // info == null | content != 0 | last = true => send/end
-        // info == null | content != 0 | last = false => send
-        // info == null | content == 0 | last = true => send/end
-        // info == null | content == 0 | last = false => noop
-
         boolean hasContent = BufferUtil.hasContent(content) && !isHeadRequest;
 
         if (info != null)
         {
-            if (commit.compareAndSet(false, true))
+            int status = info.getStatus();
+            boolean informational = HttpStatus.isInformational(status) && status != HttpStatus.SWITCHING_PROTOCOLS_101;
+            boolean committed = false;
+            if (!informational)
+                committed = commit.compareAndSet(false, true);
+
+            if (committed || informational)
             {
                 if (hasContent)
                 {
-                    commit(info, false, commitCallback);
-                    send(content, lastContent, callback);
+                    Callback commitCallback = new Callback.Nested(callback)
+                    {
+                        @Override
+                        public void succeeded()
+                        {
+                            if (transportCallback.start(callback, false))
+                                send(content, lastContent, transportCallback);
+                        }
+                    };
+                    if (transportCallback.start(commitCallback, true))
+                        commit(info, false, transportCallback);
                 }
                 else
                 {
-                    commit(info, lastContent, callback);
+                    if (transportCallback.start(callback, false))
+                        commit(info, lastContent, transportCallback);
                 }
             }
             else
@@ -117,7 +125,8 @@ public class HttpTransportOverHTTP2 implements HttpTransport
         {
             if (hasContent || lastContent)
             {
-                send(content, lastContent, callback);
+                if (transportCallback.start(callback, false))
+                    send(content, lastContent, transportCallback);
             }
             else
             {
@@ -186,6 +195,16 @@ public class HttpTransportOverHTTP2 implements HttpTransport
         stream.data(frame, callback);
     }
 
+    public void onStreamFailure(Throwable failure)
+    {
+        transportCallback.failed(failure);
+    }
+
+    public boolean onStreamTimeout(Throwable failure)
+    {
+        return transportCallback.onIdleTimeout(failure);
+    }
+
     @Override
     public void onCompleted()
     {
@@ -201,7 +220,8 @@ public class HttpTransportOverHTTP2 implements HttpTransport
         // Consume the existing queued data frames to
         // avoid stalling the session flow control.
         HttpChannelOverHTTP2 channel = (HttpChannelOverHTTP2)stream.getAttribute(IStream.CHANNEL_ATTRIBUTE);
-        channel.consumeInput();
+        if (channel != null)
+            channel.consumeInput();
     }
 
     @Override
@@ -214,20 +234,102 @@ public class HttpTransportOverHTTP2 implements HttpTransport
             stream.reset(new ResetFrame(stream.getId(), ErrorCode.INTERNAL_ERROR.code), Callback.NOOP);
     }
 
-    private class CommitCallback implements Callback.NonBlocking
+    private class TransportCallback implements Callback
     {
+        private State state = State.IDLE;
+        private Callback callback;
+        private boolean commit;
+
+        public boolean start(Callback callback, boolean commit)
+        {
+            State state;
+            synchronized (this)
+            {
+                state = this.state;
+                if (state == State.IDLE)
+                {
+                    this.state = State.WRITING;
+                    this.callback = callback;
+                    this.commit = commit;
+                    return true;
+                }
+            }
+            callback.failed(new IllegalStateException("Invalid transport state: " + state));
+            return false;
+        }
+
         @Override
         public void succeeded()
         {
+            boolean commit;
+            Callback callback = null;
+            synchronized (this)
+            {
+                commit = this.commit;
+                if (state == State.WRITING)
+                {
+                    callback = this.callback;
+                    this.callback = null;
+                    this.state = State.IDLE;
+                }
+            }
             if (LOG.isDebugEnabled())
-                LOG.debug("HTTP2 Response #{} committed", stream.getId());
+                LOG.debug("HTTP2 Response #{} {}", stream.getId(), commit ? "committed" : "flushed content");
+            if (callback != null)
+                callback.succeeded();
         }
 
         @Override
         public void failed(Throwable x)
         {
+            boolean commit;
+            Callback callback = null;
+            synchronized (this)
+            {
+                commit = this.commit;
+                if (state == State.WRITING)
+                {
+                    callback = this.callback;
+                    this.callback = null;
+                    this.state = State.FAILED;
+                }
+            }
             if (LOG.isDebugEnabled())
-                LOG.debug("HTTP2 Response #" + stream.getId() + " failed to commit", x);
+                LOG.debug("HTTP2 Response #" + stream.getId() + " failed to " + (commit ? "commit" : "flush"), x);
+            if (callback != null)
+                callback.failed(x);
         }
+
+        @Override
+        public boolean isNonBlocking()
+        {
+            return callback.isNonBlocking();
+        }
+
+        private boolean onIdleTimeout(Throwable failure)
+        {
+            boolean result;
+            Callback callback = null;
+            synchronized (this)
+            {
+                result = state == State.WRITING;
+                if (result)
+                {
+                    callback = this.callback;
+                    this.callback = null;
+                    this.state = State.TIMEOUT;
+                }
+            }
+            if (LOG.isDebugEnabled())
+                LOG.debug("HTTP2 Response #" + stream.getId() + " idle timeout", failure);
+            if (result)
+                callback.failed(failure);
+            return result;
+        }
+    }
+
+    private enum State
+    {
+        IDLE, WRITING, FAILED, TIMEOUT
     }
 }

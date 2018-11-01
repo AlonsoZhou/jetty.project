@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -136,7 +136,7 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
 
                 case EXPECT:
                 {
-                    if (_metadata.getVersion() == HttpVersion.HTTP_1_1)
+                    if (_metadata.getHttpVersion() == HttpVersion.HTTP_1_1)
                     {
                         HttpHeaderValue expect = HttpHeaderValue.CACHE.get(value);
                         switch (expect == null ? HttpHeaderValue.UNKNOWN : expect)
@@ -219,11 +219,15 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     @Override
     public void earlyEOF()
     {
+        _httpConnection.getGenerator().setPersistent(false);
         // If we have no request yet, just close
         if (_metadata.getMethod() == null)
             _httpConnection.close();
-        else
-            onEarlyEOF();
+        else if (onEarlyEOF() || _delayedForContent)
+        { 
+            _delayedForContent = false;
+            handle();
+        }
     }
 
     @Override
@@ -235,9 +239,21 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
         return handle;
     }
 
-    public void asyncReadFillInterested()
+    public void onAsyncWaitForContent()
     {
         _httpConnection.asyncReadFillInterested();
+    }
+
+    @Override
+    public void onBlockWaitForContent()
+    {
+        _httpConnection.blockingReadFillInterested();
+    }
+
+    @Override
+    public void onBlockWaitForContentFailure(Throwable failure)
+    {
+        _httpConnection.blockingReadFailure(failure);
     }
 
     @Override
@@ -266,7 +282,7 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
 
         boolean persistent;
 
-        switch (_metadata.getVersion())
+        switch (_metadata.getHttpVersion())
         {
             case HTTP_0_9:
             {
@@ -350,7 +366,7 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
 
             default:
             {
-                throw new IllegalStateException("unsupported version " + _metadata.getVersion());
+                throw new IllegalStateException("unsupported version " + _metadata.getHttpVersion());
             }
         }
 
@@ -454,11 +470,17 @@ public class HttpChannelOverHttp extends HttpChannel implements HttpParser.Reque
     }
 
     @Override
-    public boolean messageComplete()
+    public boolean contentComplete()
     {
-        boolean handle = onRequestComplete() || _delayedForContent;
+        boolean handle = onContentComplete() || _delayedForContent;
         _delayedForContent = false;
         return handle;
+    }
+
+    @Override
+    public boolean messageComplete()
+    {
+        return onRequestComplete();
     }
 
     @Override

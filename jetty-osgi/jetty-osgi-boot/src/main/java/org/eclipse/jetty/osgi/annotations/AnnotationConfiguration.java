@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -74,9 +74,9 @@ public class AnnotationConfiguration extends org.eclipse.jetty.annotations.Annot
      * This parser scans the bundles using the OSGi APIs instead of assuming a jar.
      */
     @Override
-    protected org.eclipse.jetty.annotations.AnnotationParser createAnnotationParser()
+    protected org.eclipse.jetty.annotations.AnnotationParser createAnnotationParser(int javaTargetVersion)
     {
-        return new AnnotationParser();
+        return new AnnotationParser(javaTargetVersion);
     }
     
     /**

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -33,7 +33,7 @@ public abstract class FrameGenerator
         this.headerGenerator = headerGenerator;
     }
 
-    public abstract void generate(ByteBufferPool.Lease lease, Frame frame);
+    public abstract int generate(ByteBufferPool.Lease lease, Frame frame);
 
     protected ByteBuffer generateHeader(ByteBufferPool.Lease lease, FrameType frameType, int length, int flags, int streamId)
     {

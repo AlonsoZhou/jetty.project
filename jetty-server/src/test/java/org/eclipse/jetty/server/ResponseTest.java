@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -29,12 +29,15 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.LineNumberReader;
 import java.io.PrintWriter;
+import java.net.HttpCookie;
 import java.net.Socket;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -244,6 +247,45 @@ public class ResponseTest
         response.getWriter();
         assertEquals("application/json",response.getContentType());
     }
+    
+    @Test
+    public void testInferredCharset() throws Exception
+    {
+        // Inferred from encoding.properties
+        Response response = getResponse();
+
+        assertEquals(null, response.getContentType());
+
+        response.setHeader("Content-Type", "application/xhtml+xml");
+        assertEquals("application/xhtml+xml", response.getContentType());
+        response.getWriter();
+        assertEquals("application/xhtml+xml;charset=utf-8", response.getContentType());
+        assertEquals("utf-8", response.getCharacterEncoding());
+    }
+    
+    @Test
+    public void testAssumedCharset() throws Exception
+    {
+        Response response = getResponse();
+
+        // Assumed from known types
+        assertEquals(null, response.getContentType());
+        response.setHeader("Content-Type", "text/json");
+        assertEquals("text/json", response.getContentType());
+        response.getWriter();
+        assertEquals("text/json", response.getContentType());
+        assertEquals("utf-8", response.getCharacterEncoding());
+
+        response.recycle();
+
+        // Assumed from encoding.properties
+        assertEquals(null, response.getContentType());
+        response.setHeader("Content-Type", "application/vnd.api+json");
+        assertEquals("application/vnd.api+json", response.getContentType());
+        response.getWriter();
+        assertEquals("application/vnd.api+json", response.getContentType());
+        assertEquals("utf-8", response.getCharacterEncoding());
+    }
 
     @Test
     public void testStrangeContentType() throws Exception
@@ -442,9 +484,6 @@ public class ResponseTest
         assertEquals("foo2/bar2;charset=utf-8", response.getContentType());
     }
 
-    
-    
-    
     @Test
     public void testContentTypeWithOther() throws Exception
     {
@@ -760,7 +799,38 @@ public class ResponseTest
 
         assertEquals("name=value;Version=1;Path=/path;Domain=domain;Secure;HttpOnly;Comment=comment", set);
     }
-
+    
+    /**
+     * Testing behavior documented in Chrome bug
+     * https://bugs.chromium.org/p/chromium/issues/detail?id=700618
+     */
+    @Test
+    public void testAddCookie_JavaxServletHttp() throws Exception
+    {
+        Response response = getResponse();
+    
+        Cookie cookie = new Cookie("foo", URLEncoder.encode("bar;baz", UTF_8.toString()));
+        cookie.setPath("/secure");
+    
+        response.addCookie(cookie);
+    
+        String set = response.getHttpFields().get("Set-Cookie");
+    
+        assertEquals("foo=bar%3Bbaz;Path=/secure", set);
+    }
+    
+    /**
+     * Testing behavior documented in Chrome bug
+     * https://bugs.chromium.org/p/chromium/issues/detail?id=700618
+     */
+    @Test
+    public void testAddCookie_JavaNet() throws Exception
+    {
+        HttpCookie cookie = new HttpCookie("foo", URLEncoder.encode("bar;baz", UTF_8.toString()));
+        cookie.setPath("/secure");
+        
+        assertEquals("foo=\"bar%3Bbaz\";$Path=\"/secure\"", cookie.toString());
+    }
 
     @Test
     public void testCookiesWithReset() throws Exception
@@ -825,12 +895,12 @@ public class ResponseTest
         assertEquals("minimal=value",fields.get("Set-Cookie"));
 
         fields.clear();
-        //test cookies with same name, domain and path, only 1 allowed
-        response.addSetCookie("everything","wrong","domain","path",0,"to be replaced",true,true,0);
+        //test cookies with same name, domain and path
+        response.addSetCookie("everything","something","domain","path",0,"noncomment",true,true,0);
         response.addSetCookie("everything","value","domain","path",0,"comment",true,true,0);
-        assertEquals("everything=value;Version=1;Path=path;Domain=domain;Expires=Thu, 01-Jan-1970 00:00:00 GMT;Max-Age=0;Secure;HttpOnly;Comment=comment",fields.get("Set-Cookie"));
         Enumeration<String> e =fields.getValues("Set-Cookie");
         assertTrue(e.hasMoreElements());
+        assertEquals("everything=something;Version=1;Path=path;Domain=domain;Expires=Thu, 01-Jan-1970 00:00:00 GMT;Max-Age=0;Secure;HttpOnly;Comment=noncomment",e.nextElement());
         assertEquals("everything=value;Version=1;Path=path;Domain=domain;Expires=Thu, 01-Jan-1970 00:00:00 GMT;Max-Age=0;Secure;HttpOnly;Comment=comment",e.nextElement());
         assertFalse(e.hasMoreElements());
         assertEquals("Thu, 01 Jan 1970 00:00:00 GMT",fields.get("Expires"));
@@ -887,6 +957,7 @@ public class ResponseTest
         response.addSetCookie("everything","value","","",0,"comment",true,true,0);
         e =fields.getValues("Set-Cookie");
         assertTrue(e.hasMoreElements());
+        assertEquals("everything=other;Version=1;Expires=Thu, 01-Jan-1970 00:00:00 GMT;Max-Age=0;Secure;HttpOnly;Comment=blah",e.nextElement());
         assertEquals("everything=value;Version=1;Expires=Thu, 01-Jan-1970 00:00:00 GMT;Max-Age=0;Secure;HttpOnly;Comment=comment",e.nextElement());
         assertFalse(e.hasMoreElements());
 
@@ -911,16 +982,17 @@ public class ResponseTest
         fields.clear();
         response.addSetCookie("name","value","domain",null,-1,null,false,false,-1);
         response.addSetCookie("name","other","domain",null,-1,null,false,false,-1);
-        assertEquals("name=other;Domain=domain",fields.get("Set-Cookie"));
         response.addSetCookie("name","more","domain",null,-1,null,false,false,-1);
-        assertEquals("name=more;Domain=domain",fields.get("Set-Cookie"));
+        e = fields.getValues("Set-Cookie");
+        assertTrue(e.hasMoreElements());
+        assertThat(e.nextElement(), Matchers.startsWith("name=value"));
+        assertThat(e.nextElement(), Matchers.startsWith("name=other"));
+        assertThat(e.nextElement(), Matchers.startsWith("name=more"));
+
         response.addSetCookie("foo","bar","domain",null,-1,null,false,false,-1);
         response.addSetCookie("foo","bob","domain",null,-1,null,false,false,-1);
-        assertEquals("name=more;Domain=domain",fields.get("Set-Cookie"));
+        assertThat(fields.get("Set-Cookie"), Matchers.startsWith("name=value"));
 
-        e=fields.getValues("Set-Cookie");
-        assertEquals("name=more;Domain=domain",e.nextElement());
-        assertEquals("foo=bob;Domain=domain",e.nextElement());
 
         fields.clear();
         response.addSetCookie("name","value%=",null,null,-1,null,false,false,0);

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -37,6 +37,7 @@ import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.CountingCallback;
+import org.eclipse.jetty.util.component.Destroyable;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 
@@ -469,6 +470,7 @@ public abstract class HttpReceiver
      */
     protected void reset()
     {
+        destroyDecoder(decoder);
         decoder = null;
     }
 
@@ -481,7 +483,16 @@ public abstract class HttpReceiver
      */
     protected void dispose()
     {
+        destroyDecoder(decoder);
         decoder = null;
+    }
+
+    private static void destroyDecoder(ContentDecoder decoder)
+    {
+        if (decoder instanceof Destroyable)
+        {
+            ((Destroyable)decoder).destroy();
+        }
     }
 
     public boolean abort(HttpExchange exchange, Throwable failure)

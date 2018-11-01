@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -50,6 +50,12 @@ public class HashedSession extends MemSession
      * due to serialization failures that are most likely caused by user
      * data stored in the session that is not serializable. */
     private transient boolean _saveFailed = false;
+    
+    /**
+    * Last time session was saved to prevent periodic saves to sessions
+    * that have not changed
+    */
+    private transient long _lastSaved = 0;
     
     /**
      * True if an attempt has been made to de-idle a session and it failed. Once
@@ -145,7 +151,7 @@ public class HashedSession extends MemSession
     throws Exception
     {   
         File file = null;
-        if (!_saveFailed && _hashSessionManager._storeDir != null)
+        if (!_saveFailed && _hashSessionManager._storeDir != null && _lastSaved < getAccessed())
         {
             file = new File(_hashSessionManager._storeDir, super.getId());
             if (file.exists())
@@ -155,6 +161,7 @@ public class HashedSession extends MemSession
 
             try(FileOutputStream fos = new FileOutputStream(file,false))
             {
+                _lastSaved = System.currentTimeMillis();
                 save(fos);
             }
             catch (Exception e)

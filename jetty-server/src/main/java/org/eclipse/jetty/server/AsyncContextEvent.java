@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -94,7 +94,7 @@ public class AsyncContextEvent extends AsyncEvent implements Runnable
     }
 
     /**
-     * @return The path in the context
+     * @return The path in the context (encoded with possible query string)
      */
     public String getPath()
     {
@@ -136,6 +136,9 @@ public class AsyncContextEvent extends AsyncEvent implements Runnable
         _dispatchContext=context;
     }
 
+    /**
+     * @param path encoded URI
+     */
     public void setDispatchPath(String path)
     {
         _dispatchPath=path;
@@ -158,7 +161,7 @@ public class AsyncContextEvent extends AsyncEvent implements Runnable
         Scheduler.Task task=_timeoutTask;
         _timeoutTask=null;
         if (task!=null)
-            _state.onTimeout();
+            _state.getHttpChannel().execute(() -> _state.onTimeout());
     }
 
     public void addThrowable(Throwable e)

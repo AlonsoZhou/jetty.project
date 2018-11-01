@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -42,6 +42,9 @@ public class SslClientConnectionFactory implements ClientConnectionFactory
     private final ByteBufferPool byteBufferPool;
     private final Executor executor;
     private final ClientConnectionFactory connectionFactory;
+    private boolean _directBuffersForEncryption = true;
+    private boolean _directBuffersForDecryption = true;
+    private boolean allowMissingCloseMessage = true;
 
     public SslClientConnectionFactory(SslContextFactory sslContextFactory, ByteBufferPool byteBufferPool, Executor executor, ClientConnectionFactory connectionFactory)
     {
@@ -49,6 +52,36 @@ public class SslClientConnectionFactory implements ClientConnectionFactory
         this.byteBufferPool = byteBufferPool;
         this.executor = executor;
         this.connectionFactory = connectionFactory;
+    }
+
+    public void setDirectBuffersForEncryption(boolean useDirectBuffers)
+    {
+        this._directBuffersForEncryption = useDirectBuffers;
+    }
+
+    public void setDirectBuffersForDecryption(boolean useDirectBuffers)
+    {
+        this._directBuffersForDecryption = useDirectBuffers;
+    }
+
+    public boolean isDirectBuffersForDecryption()
+    {
+        return _directBuffersForDecryption;
+    }
+
+    public boolean isDirectBuffersForEncryption()
+    {
+        return _directBuffersForEncryption;
+    }
+
+    public boolean isAllowMissingCloseMessage()
+    {
+        return allowMissingCloseMessage;
+    }
+
+    public void setAllowMissingCloseMessage(boolean allowMissingCloseMessage)
+    {
+        this.allowMissingCloseMessage = allowMissingCloseMessage;
     }
 
     @Override
@@ -63,17 +96,17 @@ public class SslClientConnectionFactory implements ClientConnectionFactory
         SslConnection sslConnection = newSslConnection(byteBufferPool, executor, endPoint, engine);
         endPoint.setConnection(sslConnection);
 
-        customize(sslConnection, context);
-
         EndPoint appEndPoint = sslConnection.getDecryptedEndPoint();
         appEndPoint.setConnection(connectionFactory.newConnection(appEndPoint, context));
+
+        customize(sslConnection, context);
 
         return sslConnection;
     }
 
     protected SslConnection newSslConnection(ByteBufferPool byteBufferPool, Executor executor, EndPoint endPoint, SSLEngine engine)
     {
-        return new SslConnection(byteBufferPool, executor, endPoint, engine);
+        return new SslConnection(byteBufferPool, executor, endPoint, engine, isDirectBuffersForEncryption(), isDirectBuffersForDecryption());
     }
 
     @Override
@@ -83,6 +116,8 @@ public class SslClientConnectionFactory implements ClientConnectionFactory
         {
             SslConnection sslConnection = (SslConnection)connection;
             sslConnection.setRenegotiationAllowed(sslContextFactory.isRenegotiationAllowed());
+            sslConnection.setRenegotiationLimit(sslContextFactory.getRenegotiationLimit());
+            sslConnection.setAllowMissingCloseMessage(isAllowMissingCloseMessage());
             ContainerLifeCycle connector = (ContainerLifeCycle)context.get(ClientConnectionFactory.CONNECTOR_CONTEXT_KEY);
             connector.getBeans(SslHandshakeListener.class).forEach(sslConnection::addHandshakeListener);
         }

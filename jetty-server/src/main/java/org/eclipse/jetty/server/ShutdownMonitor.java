@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import org.eclipse.jetty.util.IO;
 import org.eclipse.jetty.util.component.Destroyable;
 import org.eclipse.jetty.util.component.LifeCycle;
 import org.eclipse.jetty.util.thread.ShutdownThread;
@@ -257,7 +258,6 @@ public class ShutdownMonitor
         }
     }
 
-
     private ServerSocket listen()
     {
         int port = getPort();
@@ -415,6 +415,7 @@ public class ShutdownMonitor
             }
             finally
             {
+                IO.close(serverSocket);
                 stop();
                 debug("Stopped");
             }

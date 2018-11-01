@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -21,15 +21,22 @@ package org.eclipse.jetty.http2.client.http;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Queue;
+import java.util.function.BiFunction;
 
 import org.eclipse.jetty.client.HttpChannel;
 import org.eclipse.jetty.client.HttpExchange;
 import org.eclipse.jetty.client.HttpReceiver;
+import org.eclipse.jetty.client.HttpRequest;
 import org.eclipse.jetty.client.HttpResponse;
+import org.eclipse.jetty.client.api.Request;
+import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.http.MetaData;
 import org.eclipse.jetty.http2.ErrorCode;
 import org.eclipse.jetty.http2.api.Stream;
@@ -66,7 +73,7 @@ public class HttpReceiverOverHTTP2 extends HttpReceiver implements Stream.Listen
 
         HttpResponse response = exchange.getResponse();
         MetaData.Response metaData = (MetaData.Response)frame.getMetaData();
-        response.version(metaData.getVersion()).status(metaData.getStatus()).reason(metaData.getReason());
+        response.version(metaData.getHttpVersion()).status(metaData.getStatus()).reason(metaData.getReason());
 
         if (responseBegin(exchange))
         {
@@ -79,7 +86,9 @@ public class HttpReceiverOverHTTP2 extends HttpReceiver implements Stream.Listen
 
             if (responseHeaders(exchange))
             {
-                if (frame.isEndStream())
+                int status = metaData.getStatus();
+                boolean informational = HttpStatus.isInformational(status) && status != HttpStatus.SWITCHING_PROTOCOLS_101;
+                if (frame.isEndStream() || informational)
                     responseSuccess(exchange);
             }
         }
@@ -88,7 +97,32 @@ public class HttpReceiverOverHTTP2 extends HttpReceiver implements Stream.Listen
     @Override
     public Stream.Listener onPush(Stream stream, PushPromiseFrame frame)
     {
-        // Not supported.
+        HttpExchange exchange = getHttpExchange();
+        if (exchange == null)
+            return null;
+
+        HttpRequest request = exchange.getRequest();
+        MetaData.Request metaData = (MetaData.Request)frame.getMetaData();
+        HttpRequest pushRequest = (HttpRequest)getHttpDestination().getHttpClient().newRequest(metaData.getURIString());
+
+        BiFunction<Request, Request, Response.CompleteListener> pushListener = request.getPushListener();
+        if (pushListener != null)
+        {
+            Response.CompleteListener listener = pushListener.apply(request, pushRequest);
+            if (listener != null)
+            {
+                HttpChannelOverHTTP2 pushChannel = getHttpChannel().getHttpConnection().newHttpChannel(true);
+                List<Response.ResponseListener> listeners = Collections.singletonList(listener);
+                HttpExchange pushExchange = new HttpExchange(getHttpDestination(), pushRequest, listeners);
+                pushChannel.associate(pushExchange);
+                pushChannel.setStream(stream);
+                // TODO: idle timeout ?
+                pushExchange.requestComplete(null);
+                pushExchange.terminateRequest();
+                return pushChannel.getStreamListener();
+            }
+        }
+
         stream.reset(new ResetFrame(stream.getId(), ErrorCode.REFUSED_STREAM_ERROR.code), Callback.NOOP);
         return null;
     }
@@ -159,8 +193,14 @@ public class HttpReceiverOverHTTP2 extends HttpReceiver implements Stream.Listen
             {
                 dataInfo = queue.poll();
             }
+
             if (dataInfo == null)
+            {
+                DataInfo prevDataInfo = this.dataInfo;
+                if (prevDataInfo != null && prevDataInfo.last)
+                    return Action.SUCCEEDED;
                 return Action.IDLE;
+            }
 
             this.dataInfo = dataInfo;
             responseContent(dataInfo.exchange, dataInfo.buffer, this);
@@ -173,9 +213,13 @@ public class HttpReceiverOverHTTP2 extends HttpReceiver implements Stream.Listen
             ByteBufferPool byteBufferPool = getHttpDestination().getHttpClient().getByteBufferPool();
             byteBufferPool.release(dataInfo.buffer);
             dataInfo.callback.succeeded();
-            if (dataInfo.last)
-                responseSuccess(dataInfo.exchange);
             super.succeeded();
+        }
+
+        @Override
+        protected void onCompleteSuccess()
+        {
+            responseSuccess(dataInfo.exchange);
         }
 
         @Override

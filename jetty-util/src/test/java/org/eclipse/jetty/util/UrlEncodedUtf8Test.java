@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -75,45 +75,6 @@ public class UrlEncodedUtf8Test
         String test=new String(bytes,StandardCharsets.UTF_8);
         String name = "ef";
         String value = "g"+Utf8Appendable.REPLACEMENT;
-
-        fromString(test,test,name,value,false);
-        fromInputStream(test,bytes,name,value,false);
-    }
-
-    @Test
-    public void testCorrectUnicode() throws Exception
-    {
-        String chars="a=%u0061";
-        byte[] bytes= chars.getBytes(StandardCharsets.UTF_8);
-        String test=new String(bytes,StandardCharsets.UTF_8);
-        String name = "a";
-        String value = "a";
-
-        fromString(test,test,name,value,false);
-        fromInputStream(test,bytes,name,value,false);
-    }
-    
-    @Test
-    public void testIncompleteUnicode() throws Exception
-    {
-        String chars="a=%u0";
-        byte[] bytes= chars.getBytes(StandardCharsets.UTF_8);
-        String test=new String(bytes,StandardCharsets.UTF_8);
-        String name = "a";
-        String value = ""+Utf8Appendable.REPLACEMENT;
-
-        fromString(test,test,name,value,false);
-        fromInputStream(test,bytes,name,value,false);
-    }
-    
-    @Test
-    public void testIncompletePercent() throws Exception
-    {
-        String chars="a=%A";
-        byte[] bytes= chars.getBytes(StandardCharsets.UTF_8);
-        String test=new String(bytes,StandardCharsets.UTF_8);
-        String name = "a";
-        String value = ""+Utf8Appendable.REPLACEMENT;
 
         fromString(test,test,name,value,false);
         fromInputStream(test,bytes,name,value,false);

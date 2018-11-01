@@ -1,5 +1,6 @@
+//
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ========================================================================
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -13,6 +14,7 @@
 //
 //  You may elect to redistribute this code under either of these licenses.
 //  ========================================================================
+//
 
 [[quickstart-deploying-webapps]]
 === Deploying Web Applications
@@ -64,7 +66,7 @@ The demo-base/webapps directory contains the following deployable and auxiliary 
 `test-spec.xml`::
   A context configuration file that configures `test-spec.war`. 
   Additional configuration includes setting up some objects in the naming space that can be referenced by annotations.
-`xref-proxy.war`::
-  A demonstration web application that uses a transparent proxy to serve the Jetty source link:{JXURL}/[xref] from the http://www.eclipse.org/jetty[Eclipse Jetty website].
+`javadoc-proxy.war`::
+  A demonstration web application that uses a transparent proxy to serve the Jetty source link:{JDURL}/[Javadoc] from the http://www.eclipse.org/jetty[Eclipse Jetty website].
 `example-moved.xml`::
   A demonstration context configuration file that shows how to use the link:#moved-context-handler[`MovedContextHandler`] to redirect from one path to another.

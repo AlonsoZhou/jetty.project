@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,7 +18,6 @@
 
 package org.eclipse.jetty.proxy;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -40,7 +39,9 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.eclipse.jetty.client.ContinueProtocolHandler;
 import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.ProtocolHandlers;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.http.HttpField;
@@ -80,6 +81,7 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
  */
 public abstract class AbstractProxyServlet extends HttpServlet
 {
+    protected static final String CLIENT_REQUEST_ATTRIBUTE = "org.eclipse.jetty.proxy.clientRequest";
     protected static final Set<String> HOP_HEADERS;
     static
     {
@@ -324,8 +326,10 @@ public abstract class AbstractProxyServlet extends HttpServlet
             // Content must not be decoded, otherwise the client gets confused.
             client.getContentDecoderFactories().clear();
 
-            // No protocol handlers, pass everything to the client.
-            client.getProtocolHandlers().clear();
+            // Pass traffic to the client, only intercept what's necessary.
+            ProtocolHandlers protocolHandlers = client.getProtocolHandlers();
+            protocolHandlers.clear();
+            protocolHandlers.put(new ProxyContinueProtocolHandler());
 
             return client;
         }
@@ -425,6 +429,11 @@ public abstract class AbstractProxyServlet extends HttpServlet
         return clientRequest.getContentLength() > 0 ||
                 clientRequest.getContentType() != null ||
                 clientRequest.getHeader(HttpHeader.TRANSFER_ENCODING.asString()) != null;
+    }
+
+    protected boolean expects100Continue(HttpServletRequest request)
+    {
+        return HttpHeaderValue.CONTINUE.is(request.getHeader(HttpHeader.EXPECT.asString()));
     }
 
     protected void copyRequestHeaders(HttpServletRequest clientRequest, Request proxyRequest)
@@ -617,29 +626,14 @@ public abstract class AbstractProxyServlet extends HttpServlet
         if (_log.isDebugEnabled())
             _log.debug(getRequestId(clientRequest) + " proxying failed", failure);
 
-        if (proxyResponse.isCommitted())
-        {
-            try
-            {
-                // Use Jetty specific behavior to close connection.
-                proxyResponse.sendError(-1);
-                AsyncContext asyncContext = clientRequest.getAsyncContext();
-                asyncContext.complete();
-            }
-            catch (IOException x)
-            {
-                if (_log.isDebugEnabled())
-                    _log.debug(getRequestId(clientRequest) + " could not close the connection", failure);
-            }
-        }
-        else
-        {
-            proxyResponse.resetBuffer();
-            int status = failure instanceof TimeoutException ?
-                    HttpStatus.GATEWAY_TIMEOUT_504 :
-                    HttpStatus.BAD_GATEWAY_502;
-            sendProxyResponseError(clientRequest, proxyResponse, status);
-        }
+        int status = failure instanceof TimeoutException ?
+            HttpStatus.GATEWAY_TIMEOUT_504 :
+                HttpStatus.BAD_GATEWAY_502;
+        int serverStatus = serverResponse == null ? status : serverResponse.getStatus();
+        if (expects100Continue(clientRequest) && serverStatus >= HttpStatus.OK_200)
+            status = serverStatus;
+        sendProxyResponseError(clientRequest, proxyResponse, status);
+        
     }
 
     protected int getRequestId(HttpServletRequest clientRequest)
@@ -649,10 +643,30 @@ public abstract class AbstractProxyServlet extends HttpServlet
 
     protected void sendProxyResponseError(HttpServletRequest clientRequest, HttpServletResponse proxyResponse, int status)
     {
-        proxyResponse.setStatus(status);
-        proxyResponse.setHeader(HttpHeader.CONNECTION.asString(), HttpHeaderValue.CLOSE.asString());
-        if (clientRequest.isAsyncStarted())
-            clientRequest.getAsyncContext().complete();
+        try
+        {
+            if (!proxyResponse.isCommitted())
+            {
+                proxyResponse.resetBuffer();
+                proxyResponse.setHeader(HttpHeader.CONNECTION.asString(), HttpHeaderValue.CLOSE.asString());
+            }
+            proxyResponse.sendError(status);
+        }
+        catch(Exception e)
+        {
+            _log.ignore(e);
+        }
+        finally
+        {
+            if (clientRequest.isAsyncStarted())
+                clientRequest.getAsyncContext().complete();
+        }
+    }
+
+    protected void onContinue(HttpServletRequest clientRequest, Request proxyRequest)
+    {
+        if (_log.isDebugEnabled())
+            _log.debug("{} handling 100 Continue", getRequestId(clientRequest));
     }
 
     /**
@@ -731,6 +745,16 @@ public abstract class AbstractProxyServlet extends HttpServlet
                 return null;
 
             return rewrittenURI.toString();
+        }
+    }
+
+    class ProxyContinueProtocolHandler extends ContinueProtocolHandler
+    {
+        @Override
+        protected void onContinue(Request request)
+        {
+            HttpServletRequest clientRequest = (HttpServletRequest)request.getAttributes().get(CLIENT_REQUEST_ATTRIBUTE);
+            AbstractProxyServlet.this.onContinue(clientRequest, request);
         }
     }
 }

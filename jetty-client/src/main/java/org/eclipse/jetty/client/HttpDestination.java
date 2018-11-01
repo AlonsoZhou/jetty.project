@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -22,6 +22,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.channels.AsynchronousCloseException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.RejectedExecutionException;
@@ -33,13 +34,14 @@ import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpScheme;
 import org.eclipse.jetty.io.ClientConnectionFactory;
-import org.eclipse.jetty.io.ssl.SslClientConnectionFactory;
 import org.eclipse.jetty.util.BlockingArrayQueue;
+import org.eclipse.jetty.util.HostPort;
 import org.eclipse.jetty.util.Promise;
 import org.eclipse.jetty.util.annotation.ManagedAttribute;
 import org.eclipse.jetty.util.annotation.ManagedObject;
 import org.eclipse.jetty.util.component.ContainerLifeCycle;
 import org.eclipse.jetty.util.component.Dumpable;
+import org.eclipse.jetty.util.component.DumpableCollection;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 
@@ -83,7 +85,7 @@ public abstract class HttpDestination extends ContainerLifeCycle implements Dest
         }
         this.connectionFactory = connectionFactory;
 
-        String host = getHost();
+        String host = HostPort.normalizeHost(getHost());
         if (!client.isDefaultPort(getScheme(), getPort()))
             host += ":" + getPort();
         hostField = new HttpField(HttpHeader.HOST, host);
@@ -96,7 +98,7 @@ public abstract class HttpDestination extends ContainerLifeCycle implements Dest
 
     protected ClientConnectionFactory newSslClientConnectionFactory(ClientConnectionFactory connectionFactory)
     {
-        return new SslClientConnectionFactory(client.getSslContextFactory(), client.getByteBufferPool(), client.getExecutor(), connectionFactory);
+        return client.newSslClientConnectionFactory(connectionFactory);
     }
 
     public HttpClient getHttpClient()
@@ -182,9 +184,12 @@ public abstract class HttpDestination extends ContainerLifeCycle implements Dest
         int port = request.getPort();
         if (port >= 0 && getPort() != port)
             throw new IllegalArgumentException("Invalid request port " + port + " for destination " + this);
+        send(new HttpExchange(this, request, listeners));
+    }
 
-        HttpExchange exchange = new HttpExchange(this, request, listeners);
-
+    public void send(HttpExchange exchange)
+    {
+        HttpRequest request = exchange.getRequest();
         if (client.isRunning())
         {
             if (enqueue(exchanges, exchange))
@@ -267,15 +272,10 @@ public abstract class HttpDestination extends ContainerLifeCycle implements Dest
     }
 
     @Override
-    public String dump()
-    {
-        return ContainerLifeCycle.dump(this);
-    }
-
-    @Override
     public void dump(Appendable out, String indent) throws IOException
     {
-        ContainerLifeCycle.dumpObject(out, toString());
+        super.dump(out, indent);
+        ContainerLifeCycle.dump(out, indent, Collections.singleton(new DumpableCollection("exchanges", exchanges)));
     }
 
     public String asString()

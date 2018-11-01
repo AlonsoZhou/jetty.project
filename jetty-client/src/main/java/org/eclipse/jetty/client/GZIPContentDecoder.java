@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -25,11 +25,12 @@ import java.util.zip.Inflater;
 import java.util.zip.ZipException;
 
 import org.eclipse.jetty.util.BufferUtil;
+import org.eclipse.jetty.util.component.Destroyable;
 
 /**
  * {@link ContentDecoder} for the "gzip" encoding.
  */
-public class GZIPContentDecoder implements ContentDecoder
+public class GZIPContentDecoder implements ContentDecoder, Destroyable
 {
     private final Inflater inflater = new Inflater(true);
     private final byte[] bytes;
@@ -320,6 +321,12 @@ public class GZIPContentDecoder implements ContentDecoder
         size = 0;
         value = 0;
         flags = 0;
+    }
+
+    @Override
+    public void destroy()
+    {
+        inflater.end();
     }
 
     protected boolean isFinished()

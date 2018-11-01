@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -28,6 +28,7 @@ import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.ByteBuffer;
+import java.nio.file.InvalidPathException;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
@@ -419,6 +420,11 @@ public class DefaultServlet extends HttpServlet implements ResourceFactory
         {
             LOG.ignore(e);
         }
+        catch (Throwable t)
+        {
+            // Any error has potential to reveal fully qualified path
+            throw (InvalidPathException) new InvalidPathException(pathInContext, "Invalid PathInContext").initCause(t);
+        }
 
         if((r==null || !r.exists()) && pathInContext.endsWith("/jetty-dir.css"))
             r=_stylesheet;
@@ -490,9 +496,10 @@ public class DefaultServlet extends HttpServlet implements ResourceFactory
             {
                 String q=request.getQueryString();
                 pathInContext=pathInContext.substring(0,pathInContext.length()-1);
+                String uri = URIUtil.addPaths(_servletContext.getContextPath(),pathInContext);
                 if (q!=null&&q.length()!=0)
-                    pathInContext+="?"+q;
-                response.sendRedirect(response.encodeRedirectURL(URIUtil.addPaths(_servletContext.getContextPath(),pathInContext)));
+                    uri+="?"+q;
+                response.sendRedirect(response.encodeRedirectURL(uri));
                 return;
             }
             
@@ -578,16 +585,16 @@ public class DefaultServlet extends HttpServlet implements ResourceFactory
             {
                 // Redirect to the index
                 response.setContentLength(0);
+                String uri=URIUtil.encodePath(URIUtil.addPaths( _servletContext.getContextPath(),welcome));
                 String q=request.getQueryString();
-                if (q!=null&&q.length()!=0)
-                    response.sendRedirect(response.encodeRedirectURL(URIUtil.addPaths( _servletContext.getContextPath(),welcome)+"?"+q));
-                else
-                    response.sendRedirect(response.encodeRedirectURL(URIUtil.addPaths( _servletContext.getContextPath(),welcome)));
+                if (q!=null&&!q.isEmpty())
+                    uri+="?"+q;
+                response.sendRedirect(response.encodeRedirectURL(uri));
             }
             else
             {
                 // Forward to the index
-                RequestDispatcher dispatcher=request.getRequestDispatcher(welcome);
+                RequestDispatcher dispatcher=_servletContext.getRequestDispatcher(welcome);
                 if (dispatcher!=null)
                 {
                     if (included)
@@ -673,7 +680,7 @@ public class DefaultServlet extends HttpServlet implements ResourceFactory
             String welcome_in_context=URIUtil.addPaths(pathInContext,_welcomes[i]);
             Resource welcome=getResource(welcome_in_context);
             if (welcome!=null && welcome.exists())
-                return _welcomes[i];
+                return welcome_in_context;
 
             if ((_welcomeServlets || _welcomeExactServlets) && welcome_servlet==null)
             {
@@ -767,7 +774,7 @@ public class DefaultServlet extends HttpServlet implements ResourceFactory
                     if (ifnm!=null && etag!=null)
                     {
                         // Handle special case of exact match OR gzip exact match
-                        if (etag.equals(ifnm) || ifnm.endsWith(ETAG_GZIP_QUOTE) && ifnm.indexOf(',')<0 && etag.equals(removeGzipFromETag(etag)))
+                        if (etag.equals(ifnm) || ifnm.endsWith(ETAG_GZIP_QUOTE) && ifnm.indexOf(',')<0 && etag.equals(removeGzipFromETag(ifnm)))
                         {
                             response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
                             response.setHeader(HttpHeader.ETAG.asString(),ifnm);

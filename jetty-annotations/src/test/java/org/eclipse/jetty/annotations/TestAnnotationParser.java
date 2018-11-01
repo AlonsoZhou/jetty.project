@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -176,6 +176,26 @@ public class TestAnnotationParser
     }
 
     @Test
+    public void testModuleInfoClassInJar() throws Exception
+    {
+        File badClassesJar = MavenTestingUtils.getTestResourceFile("jdk9/slf4j-api-1.8.0-alpha2.jar");
+        AnnotationParser parser = new AnnotationParser();
+        Set<Handler> emptySet = Collections.emptySet();
+        parser.parse(emptySet, badClassesJar.toURI(),null);
+        // Should throw no exceptions, and happily skip the module-info.class files
+    }
+
+    @Test
+    public void testJep238MultiReleaseInJar() throws Exception
+    {
+        File badClassesJar = MavenTestingUtils.getTestResourceFile("jdk9/log4j-api-2.9.0.jar");
+        AnnotationParser parser = new AnnotationParser();
+        Set<Handler> emptySet = Collections.emptySet();
+        parser.parse(emptySet, badClassesJar.toURI(),null);
+        // Should throw no exceptions, and skip the META-INF/versions/9/* files
+    }
+
+    @Test
     public void testBasedirExclusion() throws Exception
     {
         // Build up basedir, which itself has a path segment that violates java package and classnaming.
@@ -183,7 +203,7 @@ public class TestAnnotationParser
         // Intentionally using a base director name that starts with a "."
         // This mimics what you see in jenkins, hudson, hadoop, solr, camel, and selenium for their 
         // installed and/or managed webapps
-        File basedir = testdir.getFile(".base/workspace/classes");
+        File basedir = testdir.getPathFile(".base/workspace/classes").toFile();
         FS.ensureEmpty(basedir);
 
         // Copy in class that is known to have annotations.

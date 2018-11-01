@@ -1,5 +1,6 @@
+//
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ========================================================================
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -13,6 +14,7 @@
 //
 //  You may elect to redistribute this code under either of these licenses.
 //  ========================================================================
+//
 
 [[http2-configuring]]
 === Configuring HTTP/2
@@ -65,5 +67,5 @@ Currently there are very few HTTP/2 configuration properties and the default val
 |=======================================================================
 |Property |Description
 |jetty.http2.maxConcurrentStreams |The maximum number of concurrently open streams allowed on a single HTTP/2 connection (default 1024). Larger values increase parallelism but cost a memory commitment.
-|jetty.http2.initialStreamSendWindow |The initial flow control window size for a new stream (default 65535). Larger values may allow greater throughput but also risk head of line blocking if TCP/IP flow control is triggered.
+|jetty.http2.initialStreamRecvWindow |The initial receive flow control window size for a new stream (default 65535). Larger values may allow greater throughput but also risk head of line blocking if TCP/IP flow control is triggered.
 |=======================================================================

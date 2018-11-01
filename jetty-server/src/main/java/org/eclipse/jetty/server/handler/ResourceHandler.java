@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -453,7 +453,7 @@ public class ResourceHandler extends HandlerWrapper implements ResourceFactory
             boolean endsWithSlash=(pathInfo==null?request.getServletPath():pathInfo).endsWith(URIUtil.SLASH);
             if (!endsWithSlash)
             {
-                response.sendRedirect(response.encodeRedirectURL(URIUtil.addPaths(request.getRequestURI(),URIUtil.SLASH)));
+                response.sendRedirect(response.encodeRedirectURL(request.getRequestURI()+URIUtil.SLASH));
                 return;
             }
 
@@ -546,7 +546,7 @@ public class ResourceHandler extends HandlerWrapper implements ResourceFactory
                 };
 
                 // Can we use a memory mapped file?
-                if (_minMemoryMappedContentLength>0 && 
+                if (_minMemoryMappedContentLength>=0 && 
                     resource.length()>_minMemoryMappedContentLength &&
                     resource.length()<Integer.MAX_VALUE &&
                     resource instanceof PathResource)

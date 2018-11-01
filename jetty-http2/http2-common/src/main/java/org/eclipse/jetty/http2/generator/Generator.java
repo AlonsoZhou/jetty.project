@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -75,14 +75,14 @@ public class Generator
         headerGenerator.setMaxFrameSize(maxFrameSize);
     }
 
-    public void control(ByteBufferPool.Lease lease, Frame frame)
+    public int control(ByteBufferPool.Lease lease, Frame frame)
     {
-        generators[frame.getType().getType()].generate(lease, frame);
+        return generators[frame.getType().getType()].generate(lease, frame);
     }
 
-    public void data(ByteBufferPool.Lease lease, DataFrame frame, int maxLength)
+    public int data(ByteBufferPool.Lease lease, DataFrame frame, int maxLength)
     {
-        dataGenerator.generate(lease, frame, maxLength);
+        return dataGenerator.generate(lease, frame, maxLength);
     }
 
     public void setMaxHeaderListSize(int value)

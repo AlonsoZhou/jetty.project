@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -67,7 +67,7 @@ public class WSServer
 
     public WSServer(TestingDir testdir, String contextName)
     {
-        this(testdir.getDir(),contextName);
+        this(testdir.getPath().toFile(),contextName);
     }
 
     public WSServer(File testdir, String contextName)
@@ -150,6 +150,11 @@ public class WSServer
     public URI getServerBaseURI()
     {
         return serverUri;
+    }
+    
+    public Server getServer()
+    {
+        return server;
     }
 
     public File getWebAppDir()

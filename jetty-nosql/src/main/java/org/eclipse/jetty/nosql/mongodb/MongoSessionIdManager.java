@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -268,8 +268,7 @@ public class MongoSessionIdManager extends AbstractSessionIdManager
         
         BasicDBObject query = new BasicDBObject();     
         query.put(MongoSessionManager.__ID,new BasicDBObject("$in", ids ));
-        query.put(MongoSessionManager.__EXPIRY, new BasicDBObject("$gt", 0));
-        query.put(MongoSessionManager.__EXPIRY, new BasicDBObject("$lt", atTime));   
+        query.put(MongoSessionManager.__EXPIRY, new BasicDBObject("$gt", 0).append("$lt", atTime));   
             
         DBCursor checkSessions = _sessions.find(query, new BasicDBObject(MongoSessionManager.__ID, 1));
                         

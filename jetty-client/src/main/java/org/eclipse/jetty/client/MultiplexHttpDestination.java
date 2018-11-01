@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -147,11 +147,9 @@ public abstract class MultiplexHttpDestination<C extends Connection> extends Htt
                             LOG.debug("Send failed {} for {}", result, exchange);
                         requestsPerConnection.decrementAndGet();
                         if (result.retry)
-                        {
-                            if (enqueue(getHttpExchanges(), exchange))
-                                return true;
-                        }
-                        request.abort(result.failure);
+                            send(exchange);
+                        else
+                            request.abort(result.failure);
                     }
                 }
                 return getHttpExchanges().peek() != null;

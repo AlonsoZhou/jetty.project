@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -43,6 +43,11 @@ public class BadMessageException extends RuntimeException
     public BadMessageException(String reason)
     {
         this(400,reason);
+    }
+    
+    public BadMessageException(String reason, Throwable cause)
+    {
+        this(400, reason, cause);
     }
     
     public BadMessageException(int code, String reason)

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -65,8 +65,29 @@ public class ConnectHandlerTest extends AbstractConnectHandlerTest
 
     @Test
     public void testCONNECT() throws Exception
-    {
+    {   
         String hostPort = "localhost:" + serverConnector.getLocalPort();
+        String request = "" +
+                "CONNECT " + hostPort + " HTTP/1.1\r\n" +
+                "Host: " + hostPort + "\r\n" +
+                "\r\n";
+        try (Socket socket = newSocket())
+        {
+            OutputStream output = socket.getOutputStream();
+
+            output.write(request.getBytes(StandardCharsets.UTF_8));
+            output.flush();
+
+            // Expect 200 OK from the CONNECT request
+            HttpTester.Response response = readResponse(socket.getInputStream());
+            Assert.assertEquals(HttpStatus.OK_200, response.getStatus());
+        }
+    }
+
+    @Test
+    public void testCONNECTwithIPv6() throws Exception
+    {
+        String hostPort = "[::1]:" + serverConnector.getLocalPort();
         String request = "" +
                 "CONNECT " + hostPort + " HTTP/1.1\r\n" +
                 "Host: " + hostPort + "\r\n" +

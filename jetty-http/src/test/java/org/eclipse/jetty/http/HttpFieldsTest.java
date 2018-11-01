@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -19,6 +19,7 @@
 package org.eclipse.jetty.http;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
@@ -340,7 +341,89 @@ public class HttpFieldsTest
     }
 
     @Test
-    public void testGetQualityValues() throws Exception
+    public void testGetCSV() throws Exception
+    {
+        HttpFields fields = new HttpFields();
+
+        fields.put("name0", "value0A,value0B");
+        fields.add("name0", "value0C,value0D");
+        fields.put("name1", "value1A, \"value\t, 1B\" ");
+        fields.add("name1", "\"value1C\",\tvalue1D");
+
+        Enumeration<String> e = fields.getValues("name0");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value0A,value0B");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value0C,value0D");
+        assertEquals(false, e.hasMoreElements());
+
+        e = Collections.enumeration(fields.getCSV("name0",false));
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value0A");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value0B");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value0C");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value0D");
+        assertEquals(false, e.hasMoreElements());
+
+        e = Collections.enumeration(fields.getCSV("name1",false));
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value1A");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value\t, 1B");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value1C");
+        assertEquals(true, e.hasMoreElements());
+        assertEquals(e.nextElement(), "value1D");
+        assertEquals(false, e.hasMoreElements());
+    }
+
+    @Test
+    public void testAddQuotedCSV() throws Exception
+    {
+        HttpFields fields = new HttpFields();
+
+        fields.put("some", "value");
+        fields.add("name", "\"zero\"");
+        fields.add("name", "one, \"1 + 1\"");
+        fields.put("other", "value");
+        fields.add("name", "three");
+        fields.add("name", "four, I V");
+
+        List<String> list = fields.getCSV("name",false);
+        assertEquals("zero",HttpFields.valueParameters(list.get(0),null));
+        assertEquals("one",HttpFields.valueParameters(list.get(1),null));
+        assertEquals("1 + 1",HttpFields.valueParameters(list.get(2),null));
+        assertEquals("three",HttpFields.valueParameters(list.get(3),null));
+        assertEquals("four",HttpFields.valueParameters(list.get(4),null));
+        assertEquals("I V",HttpFields.valueParameters(list.get(5),null));
+        
+        fields.addCSV("name","six");
+        list = fields.getCSV("name",false);
+        assertEquals("zero",HttpFields.valueParameters(list.get(0),null));
+        assertEquals("one",HttpFields.valueParameters(list.get(1),null));
+        assertEquals("1 + 1",HttpFields.valueParameters(list.get(2),null));
+        assertEquals("three",HttpFields.valueParameters(list.get(3),null));
+        assertEquals("four",HttpFields.valueParameters(list.get(4),null));
+        assertEquals("I V",HttpFields.valueParameters(list.get(5),null));
+        assertEquals("six",HttpFields.valueParameters(list.get(6),null));
+        
+        fields.addCSV("name","1 + 1","7","zero");
+        list = fields.getCSV("name",false);
+        assertEquals("zero",HttpFields.valueParameters(list.get(0),null));
+        assertEquals("one",HttpFields.valueParameters(list.get(1),null));
+        assertEquals("1 + 1",HttpFields.valueParameters(list.get(2),null));
+        assertEquals("three",HttpFields.valueParameters(list.get(3),null));
+        assertEquals("four",HttpFields.valueParameters(list.get(4),null));
+        assertEquals("I V",HttpFields.valueParameters(list.get(5),null));
+        assertEquals("six",HttpFields.valueParameters(list.get(6),null));
+        assertEquals("7",HttpFields.valueParameters(list.get(7),null));   
+    }
+    
+    @Test
+    public void testGetQualityCSV() throws Exception
     {
         HttpFields fields = new HttpFields();
 
@@ -350,14 +433,41 @@ public class HttpFieldsTest
         fields.add("name", "nothing;q=0");
         fields.add("name", "one;q=0.4");
         fields.add("name", "three;x=y;q=0.2;a=b,two;q=0.3");
+        fields.add("name", "first;");
 
-        List<String> list = HttpFields.qualityList(fields.getValues("name",","));
-        assertEquals("zero",HttpFields.valueParameters(list.get(0),null));
-        assertEquals("one",HttpFields.valueParameters(list.get(1),null));
-        assertEquals("two",HttpFields.valueParameters(list.get(2),null));
-        assertEquals("three",HttpFields.valueParameters(list.get(3),null));
-        assertEquals("four",HttpFields.valueParameters(list.get(4),null));
+        
+        List<String> list = fields.getQualityCSV("name");
+        assertEquals("first",HttpFields.valueParameters(list.get(0),null));
+        assertEquals("zero",HttpFields.valueParameters(list.get(1),null));
+        assertEquals("one",HttpFields.valueParameters(list.get(2),null));
+        assertEquals("two",HttpFields.valueParameters(list.get(3),null));
+        assertEquals("three",HttpFields.valueParameters(list.get(4),null));
+        assertEquals("four",HttpFields.valueParameters(list.get(5),null));
     }
+    
+    @Test
+    public void testGetQualityCSVHeader() throws Exception
+    {
+        HttpFields fields = new HttpFields();
+
+        fields.put("some", "value");
+        fields.add("Accept", "zero;q=0.9,four;q=0.1");
+        fields.put("other", "value");
+        fields.add("Accept", "nothing;q=0");
+        fields.add("Accept", "one;q=0.4");
+        fields.add("Accept", "three;x=y;q=0.2;a=b,two;q=0.3");
+        fields.add("Accept", "first;");
+
+        
+        List<String> list = fields.getQualityCSV(HttpHeader.ACCEPT);
+        assertEquals("first",HttpFields.valueParameters(list.get(0),null));
+        assertEquals("zero",HttpFields.valueParameters(list.get(1),null));
+        assertEquals("one",HttpFields.valueParameters(list.get(2),null));
+        assertEquals("two",HttpFields.valueParameters(list.get(3),null));
+        assertEquals("three",HttpFields.valueParameters(list.get(4),null));
+        assertEquals("four",HttpFields.valueParameters(list.get(5),null));
+    }
+
 
     @Test
     public void testDateFields() throws Exception

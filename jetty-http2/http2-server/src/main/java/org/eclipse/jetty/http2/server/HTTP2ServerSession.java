@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -89,6 +89,7 @@ public class HTTP2ServerSession extends HTTP2Session implements ServerParser.Lis
             IStream stream = createRemoteStream(frame.getStreamId());
             if (stream != null)
             {
+                onStreamOpened(stream);
                 stream.process(frame, Callback.NOOP);
                 Stream.Listener listener = notifyNewStream(stream, frame);
                 stream.setListener(listener);

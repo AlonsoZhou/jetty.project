@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -32,6 +32,7 @@ import org.eclipse.jetty.client.HttpResponseException;
 import org.eclipse.jetty.client.Origin;
 import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.client.util.FutureResponseListener;
+import org.eclipse.jetty.http.BadMessageException;
 import org.eclipse.jetty.http.HttpFields;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpVersion;
@@ -60,6 +61,7 @@ public class HttpReceiverOverHTTPTest
         client = new HttpClient();
         client.start();
         destination = new HttpDestinationOverHTTP(client, new Origin("http", "localhost", 8080));
+        destination.start();
         endPoint = new ByteArrayEndPoint();
         connection = new HttpConnectionOverHTTP(endPoint, destination, new Promise.Adapter<>());
         endPoint.setConnection(connection);
@@ -203,6 +205,8 @@ public class HttpReceiverOverHTTPTest
         catch (ExecutionException e)
         {
             Assert.assertTrue(e.getCause() instanceof HttpResponseException);
+            Assert.assertTrue(e.getCause().getCause() instanceof BadMessageException);
+            Assert.assertTrue(e.getCause().getCause().getCause() instanceof NumberFormatException);
         }
     }
 

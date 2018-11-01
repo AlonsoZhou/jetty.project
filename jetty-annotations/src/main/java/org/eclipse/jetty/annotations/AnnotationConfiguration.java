@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -46,6 +46,7 @@ import javax.servlet.annotation.HandlesTypes;
 import org.eclipse.jetty.annotations.AnnotationParser.Handler;
 import org.eclipse.jetty.plus.annotation.ContainerInitializer;
 import org.eclipse.jetty.util.ConcurrentHashSet;
+import org.eclipse.jetty.util.JavaVersion;
 import org.eclipse.jetty.util.MultiException;
 import org.eclipse.jetty.util.StringUtil;
 import org.eclipse.jetty.util.log.Log;
@@ -72,6 +73,7 @@ public class AnnotationConfiguration extends AbstractConfiguration
     public static final String CONTAINER_INITIALIZER_STARTER = "org.eclipse.jetty.containerInitializerStarter";
     public static final String MULTI_THREADED = "org.eclipse.jetty.annotations.multiThreaded";
     public static final String MAX_SCAN_WAIT = "org.eclipse.jetty.annotations.maxWait";
+    
     
     public static final int DEFAULT_MAX_SCAN_WAIT = 60; /* time in sec */  
     public static final boolean DEFAULT_MULTI_THREADED = true;
@@ -502,7 +504,11 @@ public class AnnotationConfiguration extends AbstractConfiguration
     protected void scanForAnnotations (WebAppContext context)
     throws Exception
     {
-        AnnotationParser parser = createAnnotationParser();
+        int javaPlatform = 0;
+        Object target = context.getAttribute(JavaVersion.JAVA_TARGET_PLATFORM);
+        if (target!=null)
+            javaPlatform = Integer.valueOf(target.toString());
+        AnnotationParser parser = createAnnotationParser(javaPlatform);
         _parserTasks = new ArrayList<ParserTask>();
 
         long start = 0; 
@@ -582,12 +588,13 @@ public class AnnotationConfiguration extends AbstractConfiguration
     
     
     /**
+     * @param javaPlatform The java platform to scan for.
      * @return a new AnnotationParser. This method can be overridden to use a different implementation of
      * the AnnotationParser. Note that this is considered internal API.
      */
-    protected AnnotationParser createAnnotationParser()
+    protected AnnotationParser createAnnotationParser(int javaPlatform)
     {
-        return new AnnotationParser();
+        return new AnnotationParser(javaPlatform);
     }
     
     /**

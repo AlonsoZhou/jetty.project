@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -221,9 +221,13 @@ public abstract class AbstractEventDriver extends AbstractLifeCycle implements I
     public void openSession(WebSocketSession session)
     {
         if (LOG.isDebugEnabled())
-            LOG.debug("openSession({})",session);
+        {
+            LOG.debug("openSession({})", session);
+            LOG.debug("objectFactory={}", session.getContainerScope().getObjectFactory());
+        }
         this.session = session;
         this.session.getContainerScope().getObjectFactory().decorate(this.websocket);
+        
         try
         {
             this.onConnect();

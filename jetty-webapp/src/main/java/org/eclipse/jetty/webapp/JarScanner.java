@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -43,7 +43,9 @@ import org.eclipse.jetty.util.resource.Resource;
  * Subclasses should implement the processEntry(URL jarUrl, JarEntry entry)
  * method to handle entries in jar files whose names match the supplied 
  * pattern.
+ * @deprecated Does not handle MR Jars
  */
+@Deprecated()
 public abstract class JarScanner extends org.eclipse.jetty.util.PatternMatcher
 {
     private static final Logger LOG = Log.getLogger(JarScanner.class);

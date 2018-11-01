@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -16,12 +16,6 @@
 //  ========================================================================
 //
 
-/*
- * Created on 9/01/2004
- *
- * To change the template for this generated file go to
- * Window&gt;Preferences&gt;Java&gt;Code Generation&gt;Code and Comments
- */
 package org.eclipse.jetty.server;
 
 import static org.hamcrest.Matchers.containsString;
@@ -46,9 +40,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/**
- *
- */
 @RunWith(AdvancedRunner.class)
 public class PartialRFC2616Test
 {
@@ -253,6 +244,39 @@ public class PartialRFC2616Test
         assertEquals("Quality parameters","ccc",HttpFields.valueParameters(list.get(4),null));
         assertEquals("Quality parameters","ddd",HttpFields.valueParameters(list.get(5),null));
     }
+    
+
+
+    @Test
+    public void test4_1() throws Exception
+    {
+        int offset=0;
+        // If _content length not used, second request will not be read.
+        String response = connector.getResponses(
+                "\r\n" +
+                        "GET /R1 HTTP/1.1\r\n" +
+                        "Host: localhost\r\n" +
+                        "\r\n" +
+                        "\r\n" +
+                        "\r\n" +
+                        "\r\n" +
+                        "GET /R2 HTTP/1.1\r\n" +
+                        "Host: localhost\r\n" +
+                        "\r\n" +
+                        " \r\n" +
+                        "GET /R3 HTTP/1.1\r\n" +
+                        "Host: localhost\r\n" +
+                        "Connection: close\r\n" +
+                        "\r\n" 
+                );
+        offset=checkContains(response,offset,"HTTP/1.1 200 OK","2. identity")+10;
+        offset=checkContains(response,offset,"/R1","2. identity")+3;
+        offset=checkContains(response,offset,"HTTP/1.1 200 OK","2. identity")+10;
+        offset=checkContains(response,offset,"/R2","2. identity")+3;
+        checkNotContained(response,offset,"HTTP/1.1 200 OK","2. identity");
+        checkNotContained(response,offset,"/R3","2. identity");
+    }
+
 
     @Test
     public void test4_4_2() throws Exception
@@ -282,8 +306,8 @@ public class PartialRFC2616Test
     @Test
     public void test4_4_3() throws Exception
     {
-        // _content length is ignored, as chunking is used. If it is
-        // not ignored, the second request wont be seen.
+        // Due to smuggling concerns, handling has been changed to
+        // treat content length and chunking as a bad request.
         int offset=0;
         String response = connector.getResponses(
                 "GET /R1 HTTP/1.1\n" +
@@ -306,12 +330,8 @@ public class PartialRFC2616Test
                         "Content-Length: 6\n" +
                         "\n" +
                         "abcdef");
-        offset=checkContains(response,offset,"HTTP/1.1 200 OK","3. ignore c-l")+1;
-        offset=checkContains(response,offset,"/R1","3. ignore c-l")+1;
-        offset=checkContains(response,offset,"123456","3. ignore c-l")+1;
-        offset=checkContains(response,offset,"HTTP/1.1 200 OK","3. ignore c-l")+1;
-        offset=checkContains(response,offset,"/R2","3. _content-length")+1;
-        offset=checkContains(response,offset,"abcdef","3. _content-length")+1;
+        offset=checkContains(response,offset,"HTTP/1.1 400 Bad","3. ignore c-l")+1;
+        checkNotContained(response,offset,"/R2","3. _content-length");
     }
 
     @Test

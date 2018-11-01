@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -17,6 +17,8 @@
 //
 
 package org.eclipse.jetty.util;
+
+import java.util.Objects;
 
 import org.eclipse.jetty.util.log.Log;
 
@@ -61,13 +63,25 @@ public interface Promise<C>
         }
     }
 
-    public static abstract class Wrapper<W> implements Promise<W>
+    public static class Wrapper<W> implements Promise<W>
     {
         private final Promise<W> promise;
 
         public Wrapper(Promise<W> promise)
         {
-            this.promise = promise;
+            this.promise = Objects.requireNonNull(promise);
+        }
+
+        @Override
+        public void succeeded(W result)
+        {
+            promise.succeeded(result);
+        }
+
+        @Override
+        public void failed(Throwable x)
+        {
+            promise.failed(x);
         }
 
         public Promise<W> getPromise()

@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -140,6 +140,16 @@ public abstract class AbstractConnection implements Connection
         if (LOG.isDebugEnabled())
             LOG.debug("fillInterested {}",this);
         getEndPoint().fillInterested(_readCallback);
+    }
+
+    public void tryFillInterested()
+    {
+        tryFillInterested(_readCallback);
+    }
+
+    public void tryFillInterested(Callback callback)
+    {
+        getEndPoint().tryFillInterested(callback);
     }
 
     public boolean isFillInterested()

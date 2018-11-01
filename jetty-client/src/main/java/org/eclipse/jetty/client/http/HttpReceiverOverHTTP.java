@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -260,6 +260,13 @@ public class HttpReceiverOverHTTP extends HttpReceiver implements HttpParser.Res
         return !proceed || async;
     }
 
+
+    @Override
+    public boolean contentComplete()
+    {
+        return false;
+    }
+    
     @Override
     public boolean messageComplete()
     {
@@ -296,12 +303,18 @@ public class HttpReceiverOverHTTP extends HttpReceiver implements HttpParser.Res
     @Override
     public void badMessage(int status, String reason)
     {
+        badMessage(status, reason, null);
+    }
+    
+    @Override
+    public void badMessage(int status, String reason, Throwable cause)
+    {
         HttpExchange exchange = getHttpExchange();
         if (exchange != null)
         {
             HttpResponse response = exchange.getResponse();
             response.status(status).reason(reason);
-            failAndClose(new HttpResponseException("HTTP protocol violation: bad response on " + getHttpConnection(), response));
+            failAndClose(new HttpResponseException("HTTP protocol violation: bad response on " + getHttpConnection(), response, cause));
         }
     }
 

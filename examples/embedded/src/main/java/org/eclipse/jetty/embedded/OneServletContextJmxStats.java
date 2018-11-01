@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -21,8 +21,8 @@ package org.eclipse.jetty.embedded;
 import java.lang.management.ManagementFactory;
 
 import org.eclipse.jetty.jmx.MBeanContainer;
-import org.eclipse.jetty.server.ConnectorStatistics;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnectionStatistics;
 import org.eclipse.jetty.servlet.DefaultServlet;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 
@@ -44,7 +44,7 @@ public class OneServletContextJmxStats
         context.addServlet(DefaultServlet.class, "/");
 
         // Add Connector Statistics tracking to all connectors
-        ConnectorStatistics.addToAllConnectors(server);
+        ServerConnectionStatistics.addToAllConnectors(server);
 
         server.start();
         server.join();

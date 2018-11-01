@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -18,6 +18,8 @@
 
 package org.eclipse.jetty.webapp;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
@@ -43,9 +45,10 @@ public class JettyWebXmlConfiguration extends AbstractConfiguration
     /** The value of this property points to the WEB-INF directory of
      * the web-app currently installed.
      * it is passed as a property to the jetty-web.xml file */
+    @Deprecated
     public static final String PROPERTY_THIS_WEB_INF_URL = "this.web-inf.url";
-
-
+    public static final String PROPERTY_WEB_INF_URI = "web-inf.uri";
+    public static final String PROPERTY_WEB_INF = "web-inf";
     public static final String XML_CONFIGURATION = "org.eclipse.jetty.webapp.JettyWebXmlConfiguration";
     public static final String JETTY_WEB_XML = "jetty-web.xml";
 
@@ -118,10 +121,11 @@ public class JettyWebXmlConfiguration extends AbstractConfiguration
      * @param jetty_config The configuration object.
      * @param web_inf the WEB-INF location
      */
-    private void setupXmlConfiguration(XmlConfiguration jetty_config, Resource web_inf)
+    private void setupXmlConfiguration(XmlConfiguration jetty_config, Resource web_inf) throws IOException
     {
         Map<String,String> props = jetty_config.getProperties();
-        // TODO - should this be an id rather than a property?
-        props.put(PROPERTY_THIS_WEB_INF_URL, String.valueOf(web_inf.getURL()));
+        props.put(PROPERTY_THIS_WEB_INF_URL, web_inf.getURI().toString());  
+        props.put(PROPERTY_WEB_INF_URI, web_inf.getURI().toString());
+        props.put(PROPERTY_WEB_INF, web_inf.toString());
     }
 }

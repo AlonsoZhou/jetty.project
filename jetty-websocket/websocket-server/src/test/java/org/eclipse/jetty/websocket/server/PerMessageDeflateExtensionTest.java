@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -17,6 +17,10 @@
 //
 
 package org.eclipse.jetty.websocket.server;
+
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.is;
+import static org.junit.Assert.assertThat;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -42,10 +46,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
-
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertThat;
 
 @RunWith(Parameterized.class)
 public class PerMessageDeflateExtensionTest
@@ -155,7 +155,7 @@ public class PerMessageDeflateExtensionTest
             Future<Session> fut = client.connect(clientSocket,server.getServerUri(),request);
 
             // Wait for connect
-            Session session = fut.get(5,TimeUnit.SECONDS);
+            Session session = fut.get(30,TimeUnit.SECONDS);
 
             assertThat("Response.extensions",getNegotiatedExtensionList(session),containsString("permessage-deflate"));
 

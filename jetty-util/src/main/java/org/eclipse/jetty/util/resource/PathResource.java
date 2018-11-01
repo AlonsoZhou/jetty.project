@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -73,7 +73,17 @@ public class PathResource extends Resource
 
         if(!URIUtil.equalsIgnoreEncodings(uri,path.toUri()))
         {
-            return new File(uri).toPath().toAbsolutePath();
+            try
+            {
+                return Paths.get(uri).toRealPath(FOLLOW_LINKS);
+            }
+            catch (IOException ignored)
+            {
+                // If the toRealPath() call fails, then let
+                // the alias checking routines continue on
+                // to other techniques.
+                LOG.ignore(ignored);
+            }
         }
 
         if (!abs.isAbsolute())
@@ -194,16 +204,16 @@ public class PathResource extends Resource
      * @param parent the parent path resource
      * @param childPath the child sub path
      */
-    private PathResource(PathResource parent, String childPath) throws MalformedURLException
+    private PathResource(PathResource parent, String childPath)
     {
         // Calculate the URI and the path separately, so that any aliasing done by
-        // FileSystem.getPath(path,childPath) is visiable as a difference to the URI
+        // FileSystem.getPath(path,childPath) is visible as a difference to the URI
         // obtained via URIUtil.addDecodedPath(uri,childPath)
 
         this.path = parent.path.getFileSystem().getPath(parent.path.toString(), childPath);
-        if (isDirectory() &&!childPath.endsWith("/"))
-            childPath+="/";
-        this.uri = URIUtil.addDecodedPath(parent.uri,childPath);
+        if (isDirectory() && !childPath.endsWith("/"))
+            childPath += "/";
+        this.uri = URIUtil.addPath(parent.uri, childPath);
         this.alias = checkAliasPath();
     }
 
@@ -231,10 +241,6 @@ public class PathResource extends Resource
         try
         {
             path = Paths.get(uri);
-        }
-        catch (InvalidPathException e)
-        {
-            throw e;
         }
         catch (IllegalArgumentException e)
         {
@@ -276,7 +282,7 @@ public class PathResource extends Resource
     }
 
     @Override
-    public Resource addPath(final String subpath) throws IOException, MalformedURLException
+    public Resource addPath(final String subpath) throws IOException
     {
         String cpath = URIUtil.canonicalPath(subpath);
 

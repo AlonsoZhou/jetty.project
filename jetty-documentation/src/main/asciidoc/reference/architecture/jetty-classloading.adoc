@@ -1,5 +1,6 @@
+//
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ========================================================================
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -13,6 +14,7 @@
 //
 //  You may elect to redistribute this code under either of these licenses.
 //  ========================================================================
+//
 
 [[jetty-classloading]]
 === Jetty Classloading
@@ -133,7 +135,7 @@ You can add extra classpaths to Jetty in several ways.
 [[classpaths-using-start-jar]]
 ===== Using `start.jar`
 
-If you are using xref:advanced-start-features[], at startup the jetty runtime automatically loads option Jars from the top level `$jetty.home/lib` directory. The default settings include:
+If you are using `start.jar` via the Jetty distribution, at startup the Jetty runtime automatically loads option Jars from the top level `$jetty.home/lib` directory. The default settings include:
 
 * Adding Jars under `$jetty.home/lib/ext` to the system classpath.
 You can place additional Jars here.

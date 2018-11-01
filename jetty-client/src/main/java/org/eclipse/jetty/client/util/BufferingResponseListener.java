@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -89,10 +89,14 @@ public abstract class BufferingResponseListener extends Listener.Adapter
             {
                 media = contentType.substring(0, index);
                 String encoding = contentType.substring(index + charset.length());
-                // Sometimes charsets arrive with an ending semicolon
+                // Sometimes charsets arrive with an ending semicolon.
                 int semicolon = encoding.indexOf(';');
                 if (semicolon > 0)
                     encoding = encoding.substring(0, semicolon).trim();
+                // Sometimes charsets are quoted.
+                int lastIndex = encoding.length() - 1;
+                if (encoding.charAt(0) == '"' && encoding.charAt(lastIndex) == '"')
+                    encoding = encoding.substring(1, lastIndex).trim();
                 this.encoding = encoding;
             }
 

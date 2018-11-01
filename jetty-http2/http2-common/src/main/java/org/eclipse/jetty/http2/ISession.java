@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -127,4 +127,9 @@ public interface ISession extends Session
      * @param frame the synthetic frame to process
      */
     public void onFrame(Frame frame);
+
+    /**
+     * @return the number of bytes written by this session
+     */
+    public long getBytesWritten();
 }

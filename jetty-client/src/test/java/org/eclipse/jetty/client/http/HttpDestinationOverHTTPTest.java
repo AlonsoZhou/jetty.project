@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -59,6 +59,7 @@ public class HttpDestinationOverHTTPTest extends AbstractHttpClientServerTest
     public void test_FirstAcquire_WithEmptyQueue() throws Exception
     {
         HttpDestinationOverHTTP destination = new HttpDestinationOverHTTP(client, new Origin("http", "localhost", connector.getLocalPort()));
+        destination.start();
         Connection connection = destination.acquire();
         if (connection == null)
         {
@@ -72,6 +73,7 @@ public class HttpDestinationOverHTTPTest extends AbstractHttpClientServerTest
     public void test_SecondAcquire_AfterFirstAcquire_WithEmptyQueue_ReturnsSameConnection() throws Exception
     {
         HttpDestinationOverHTTP destination = new HttpDestinationOverHTTP(client, new Origin("http", "localhost", connector.getLocalPort()));
+        destination.start();
         Connection connection1 = destination.acquire();
         if (connection1 == null)
         {
@@ -118,6 +120,7 @@ public class HttpDestinationOverHTTPTest extends AbstractHttpClientServerTest
                 };
             }
         };
+        destination.start();
         Connection connection1 = destination.acquire();
 
         // Make sure we entered idleCreated().
@@ -145,6 +148,7 @@ public class HttpDestinationOverHTTPTest extends AbstractHttpClientServerTest
     public void test_Acquire_Process_Release_Acquire_ReturnsSameConnection() throws Exception
     {
         HttpDestinationOverHTTP destination = new HttpDestinationOverHTTP(client, new Origin("http", "localhost", connector.getLocalPort()));
+        destination.start();
         HttpConnectionOverHTTP connection1 = destination.acquire();
 
         long start = System.nanoTime();
@@ -172,6 +176,7 @@ public class HttpDestinationOverHTTPTest extends AbstractHttpClientServerTest
         client.setIdleTimeout(idleTimeout);
 
         HttpDestinationOverHTTP destination = new HttpDestinationOverHTTP(client, new Origin("http", "localhost", connector.getLocalPort()));
+        destination.start();
         Connection connection1 = destination.acquire();
         if (connection1 == null)
         {
@@ -273,6 +278,33 @@ public class HttpDestinationOverHTTPTest extends AbstractHttpClientServerTest
 
         destinationAfter = client.getDestination(scheme, host, port);
         Assert.assertNotSame(destinationBefore, destinationAfter);
+    }
+
+    @Test
+    public void testDestinationIsRemovedAfterConnectionError() throws Exception
+    {
+        String host = "localhost";
+        int port = connector.getLocalPort();
+        client.setRemoveIdleDestinations(true);
+        Assert.assertTrue("Destinations of a fresh client must be empty", client.getDestinations().isEmpty());
+
+        server.stop();
+        Request request = client.newRequest(host, port).scheme(this.scheme);
+        try
+        {
+            request.send();
+            Assert.fail("Request to a closed port must fail");
+        }
+        catch (Exception expected)
+        {
+        }
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (!client.getDestinations().isEmpty() && System.nanoTime() < deadline)
+        {
+            Thread.sleep(10);
+        }
+        Assert.assertTrue("Destination must be removed after connection error", client.getDestinations().isEmpty());
     }
 
     private Connection timedPoll(Queue<Connection> connections, long time, TimeUnit unit) throws InterruptedException

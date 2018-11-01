@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -20,8 +20,10 @@ package org.eclipse.jetty.http2;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.Queue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.eclipse.jetty.http2.parser.Parser;
 import org.eclipse.jetty.io.AbstractConnection;
@@ -29,7 +31,6 @@ import org.eclipse.jetty.io.ByteBufferPool;
 import org.eclipse.jetty.io.EndPoint;
 import org.eclipse.jetty.util.BufferUtil;
 import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.ConcurrentArrayQueue;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;
 import org.eclipse.jetty.util.thread.ExecutionStrategy;
@@ -38,12 +39,13 @@ public class HTTP2Connection extends AbstractConnection
 {
     protected static final Logger LOG = Log.getLogger(HTTP2Connection.class);
 
-    private final Queue<Runnable> tasks = new ConcurrentArrayQueue<>();
+    private final Queue<Runnable> tasks = new ArrayDeque<>();
+    private final HTTP2Producer producer = new HTTP2Producer();
+    private final AtomicLong bytesIn = new AtomicLong();
     private final ByteBufferPool byteBufferPool;
     private final Parser parser;
     private final ISession session;
     private final int bufferSize;
-    private final HTTP2Producer producer = new HTTP2Producer();
     private final ExecutionStrategy executionStrategy;
 
     public HTTP2Connection(ByteBufferPool byteBufferPool, Executor executor, EndPoint endPoint, Parser parser, ISession session, int bufferSize, ExecutionStrategy.Factory executionFactory)
@@ -56,11 +58,22 @@ public class HTTP2Connection extends AbstractConnection
         this.executionStrategy = executionFactory.newExecutionStrategy(producer, executor);
     }
 
+    @Override
+    public long getBytesIn()
+    {
+        return bytesIn.get();
+    }
+
+    @Override
+    public long getBytesOut()
+    {
+        return session.getBytesWritten();
+    }
+
     public ISession getSession()
     {
         return session;
     }
-
 
     protected Parser getParser()
     {
@@ -127,7 +140,7 @@ public class HTTP2Connection extends AbstractConnection
 
     protected void offerTask(Runnable task, boolean dispatch)
     {
-        tasks.offer(task);
+        offerTask(task);
         if (dispatch)
             executionStrategy.dispatch();
         else
@@ -142,21 +155,38 @@ public class HTTP2Connection extends AbstractConnection
         session.close(ErrorCode.NO_ERROR.code, "close", Callback.NOOP);
     }
 
+    private void offerTask(Runnable task)
+    {
+        synchronized (this)
+        {
+            tasks.offer(task);
+        }
+    }
+
+    private Runnable pollTask()
+    {
+        synchronized (this)
+        {
+            return tasks.poll();
+        }
+    }
+
     protected class HTTP2Producer implements ExecutionStrategy.Producer
     {
         private final Callback fillCallback = new FillCallback();
         private ByteBuffer buffer;
+        private boolean shutdown;
 
         @Override
         public Runnable produce()
         {
-            Runnable task = tasks.poll();
+            Runnable task = pollTask();
             if (LOG.isDebugEnabled())
                 LOG.debug("Dequeued task {}", task);
             if (task != null)
                 return task;
 
-            if (isFillInterested())
+            if (isFillInterested() || shutdown)
                 return null;
 
             if (buffer == null)
@@ -169,7 +199,7 @@ public class HTTP2Connection extends AbstractConnection
                     while (buffer.hasRemaining())
                         parser.parse(buffer);
 
-                    task = tasks.poll();
+                    task = pollTask();
                     if (LOG.isDebugEnabled())
                         LOG.debug("Dequeued new task {}", task);
                     if (task != null)
@@ -192,8 +222,13 @@ public class HTTP2Connection extends AbstractConnection
                 else if (filled < 0)
                 {
                     release();
+                    shutdown = true;
                     session.onShutdown();
                     return null;
+                }
+                else
+                {
+                    bytesIn.addAndGet(filled);
                 }
 
                 looping = true;

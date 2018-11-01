@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -35,22 +35,22 @@ public class ResetGenerator extends FrameGenerator
     }
 
     @Override
-    public void generate(ByteBufferPool.Lease lease, Frame frame)
+    public int generate(ByteBufferPool.Lease lease, Frame frame)
     {
         ResetFrame resetFrame = (ResetFrame)frame;
-        generateReset(lease, resetFrame.getStreamId(), resetFrame.getError());
+        return generateReset(lease, resetFrame.getStreamId(), resetFrame.getError());
     }
 
-    public void generateReset(ByteBufferPool.Lease lease, int streamId, int error)
+    public int generateReset(ByteBufferPool.Lease lease, int streamId, int error)
     {
         if (streamId < 0)
             throw new IllegalArgumentException("Invalid stream id: " + streamId);
 
-        ByteBuffer header = generateHeader(lease, FrameType.RST_STREAM, 4, Flags.NONE, streamId);
-
+        ByteBuffer header = generateHeader(lease, FrameType.RST_STREAM, ResetFrame.RESET_LENGTH, Flags.NONE, streamId);
         header.putInt(error);
-
         BufferUtil.flipToFlush(header, 0);
         lease.append(header, true);
+
+        return Frame.HEADER_LENGTH + ResetFrame.RESET_LENGTH;
     }
 }

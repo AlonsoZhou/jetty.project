@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -21,12 +21,9 @@ package org.eclipse.jetty.server;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.channels.IllegalSelectorException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.Enumeration;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -252,10 +249,7 @@ public class Response implements HttpServletResponse
         quoteOnlyOrAppend(buf,name,quote_name);
         
         buf.append('=');
-        
-        // Remember name= part to look for other matching set-cookie
-        String name_equals=buf.toString();
-
+       
         // Append the value
         boolean quote_value=isQuoteNeededForCookie(value);
         quoteOnlyOrAppend(buf,value,quote_value);
@@ -320,26 +314,6 @@ public class Response implements HttpServletResponse
         {
             buf.append(";Comment=");
             quoteOnlyOrAppend(buf,comment,isQuoteNeededForCookie(comment));
-        }
-
-        // remove any existing set-cookie fields of same name
-        Iterator<HttpField> i=_fields.iterator();
-        while (i.hasNext())
-        {
-            HttpField field=i.next();
-            if (field.getHeader()==HttpHeader.SET_COOKIE)
-            {
-                String val = field.getValue();
-                if (val!=null && val.startsWith(name_equals))
-                {
-                    //existing cookie has same name, does it also match domain and path?
-                    if (((!has_domain && !val.contains("Domain")) || (has_domain && val.contains(domain))) &&
-                        ((!has_path && !val.contains("Path")) || (has_path && val.contains(path))))
-                    {
-                        i.remove();
-                    }
-                }
-            }
         }
         
         // add the set cookie
@@ -674,7 +648,7 @@ public class Response implements HttpServletResponse
                 // relative to request
                 String path=_channel.getRequest().getRequestURI();
                 String parent=(path.endsWith("/"))?path:URIUtil.parentPath(path);
-                location=URIUtil.canonicalPath(URIUtil.addPaths(parent,location));
+                location=URIUtil.canonicalPath(URIUtil.addEncodedPaths(parent,location));
                 if (!location.startsWith("/"))
                     buf.append('/');
             }
@@ -863,7 +837,15 @@ public class Response implements HttpServletResponse
     public String getCharacterEncoding()
     {
         if (_characterEncoding == null)
-            _characterEncoding = StringUtil.__ISO_8859_1;
+        {
+            String encoding = MimeTypes.getCharsetAssumedFromContentType(_contentType);
+            if (encoding!=null)
+                return encoding;
+            encoding = MimeTypes.getCharsetInferredFromContentType(_contentType);
+            if (encoding!=null)
+                return encoding;
+            return StringUtil.__ISO_8859_1;
+        }
         return _characterEncoding;
     }
 
@@ -903,10 +885,14 @@ public class Response implements HttpServletResponse
                     encoding=_mimeType.getCharsetString();
                 else
                 {
-                    encoding = MimeTypes.inferCharsetFromContentType(_contentType);
+                    encoding = MimeTypes.getCharsetAssumedFromContentType(_contentType);
                     if (encoding == null)
-                        encoding = StringUtil.__ISO_8859_1;
-                    setCharacterEncoding(encoding,EncodingFrom.INFERRED);
+                    {
+                        encoding = MimeTypes.getCharsetInferredFromContentType(_contentType);
+                        if (encoding == null)
+                            encoding = StringUtil.__ISO_8859_1;
+                        setCharacterEncoding(encoding,EncodingFrom.INFERRED);
+                    }
                 }
             }
             
@@ -1154,15 +1140,16 @@ public class Response implements HttpServletResponse
                 _fields.put(_mimeType.getContentTypeField());
             }
         }
-        
     }
 
     @Override
     public void setBufferSize(int size)
     {
-        if (isCommitted() || getContentCount() > 0)
-            throw new IllegalStateException("cannot set buffer size on committed response");
-        if (size <= 0)
+        if (isCommitted())
+            throw new IllegalStateException("cannot set buffer size after response is in committed state");
+        if (getContentCount() > 0)
+            throw new IllegalStateException("cannot set buffer size after response has " + getContentCount() + " bytes already written");
+        if (size < __MIN_BUFFER_SIZE)
             size = __MIN_BUFFER_SIZE;
         _out.setBufferSize(size);
     }

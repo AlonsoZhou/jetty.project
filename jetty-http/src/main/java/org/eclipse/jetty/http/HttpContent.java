@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -73,7 +73,7 @@ public interface HttpContent
          * @param maxBuffer The maximum buffer to allocated for this request.  For cached content, a larger buffer may have
          * previously been allocated and returned by the {@link HttpContent#getDirectBuffer()} or {@link HttpContent#getIndirectBuffer()} calls.
          * @return A {@link HttpContent}
-         * @throws IOException
+         * @throws IOException IO Exception reading content
          */
         HttpContent getContent(String path,int maxBuffer) throws IOException;
     }

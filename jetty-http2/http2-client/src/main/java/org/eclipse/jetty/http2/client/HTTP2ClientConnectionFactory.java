@@ -1,6 +1,6 @@
 //
 //  ========================================================================
-//  Copyright (c) 1995-2016 Mort Bay Consulting Pty. Ltd.
+//  Copyright (c) 1995-2018 Mort Bay Consulting Pty. Ltd.
 //  ------------------------------------------------------------------------
 //  All rights reserved. This program and the accompanying materials
 //  are made available under the terms of the Eclipse Public License v1.0
@@ -116,6 +116,20 @@ public class HTTP2ClientConnectionFactory implements ClientConnectionFactory
             this.client = client;
             this.promise = promise;
             this.listener = listener;
+        }
+
+        @Override
+        public int getMessagesIn()
+        {
+            HTTP2ClientSession session = (HTTP2ClientSession)getSession();
+            return (int)session.getStreamsOpened();
+        }
+
+        @Override
+        public int getMessagesOut()
+        {
+            HTTP2ClientSession session = (HTTP2ClientSession)getSession();
+            return (int)session.getStreamsClosed();
         }
 
         @Override

@@ -1,18 +1,21 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
-  <modelVersion>4.0.0</modelVersion>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <parent>
     <groupId>org.eclipse.jetty</groupId>
     <artifactId>jetty-project</artifactId>
-    <version>9.3.12-SNAPSHOT</version>
+    <version>9.3.26-SNAPSHOT</version>
   </parent>
+  <modelVersion>4.0.0</modelVersion>
   <artifactId>jetty-distribution</artifactId>
   <name>Jetty :: Distribution Assemblies</name>
-  <url>http://www.eclipse.org/jetty</url>
   <packaging>pom</packaging>
+
   <properties>
     <assembly-directory>${basedir}/target/distribution</assembly-directory>
     <jetty-setuid-version>1.0.3</jetty-setuid-version>
   </properties>
+
   <build>
     <plugins>
       <plugin>
@@ -54,7 +57,7 @@
             </configuration>
           </execution>
           <execution>
-	    <id>removeKeystore</id>
+            <id>removeKeystore</id>
             <phase>process-resources</phase>
             <goals>
               <goal>run</goal>
@@ -154,7 +157,7 @@
                   <overWrite>true</overWrite>
                   <includes>**</includes>
                   <outputDirectory>${assembly-directory}/demo-base/webapps</outputDirectory>
-                  <destFileName>xref-proxy.war</destFileName>
+                  <destFileName>javadoc-proxy.war</destFileName>
                 </artifactItem>
                 <artifactItem>
                   <groupId>org.eclipse.jetty.example-async-rest</groupId>
@@ -603,7 +606,7 @@
           <descriptors>
             <descriptor>src/main/assembly/jetty-assembly.xml</descriptor>
           </descriptors>
-          <tarLongFileMode>gnu</tarLongFileMode>
+          <tarLongFileMode>posix</tarLongFileMode>
           <appendAssemblyId>false</appendAssemblyId>
         </configuration>
         <executions>
@@ -633,6 +636,7 @@
       </plugin>
     </plugins>
   </build>
+
   <dependencies>
     <!-- Orbit Deps -->
     <dependency>
@@ -819,6 +823,11 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-hazelcast</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.eclipse.jetty.gcloud</groupId>
       <artifactId>jetty-gcloud-session-manager</artifactId>
       <version>${project.version}</version>
@@ -841,4 +850,21 @@
       <type>zip</type>
     </dependency>
   </dependencies>
+
+  <profiles>
+    <profile>
+      <id>jdk9</id>
+      <activation>
+        <jdk>[1.9,)</jdk>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.eclipse.jetty</groupId>
+          <artifactId>jetty-alpn-java-server</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
+
 </project>
